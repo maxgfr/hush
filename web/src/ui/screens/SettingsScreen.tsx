@@ -161,7 +161,7 @@ export function SettingsScreen(): JSX.Element {
         </label>
         <div class="row">
           <button type="submit" class="btn btn-primary">
-            {saved ? t("copied").replace(/.*/, "✓") : t("save")}
+            {saved ? t("saved") : t("save")}
           </button>
           <button
             type="button"
@@ -172,7 +172,7 @@ export function SettingsScreen(): JSX.Element {
               setStun(DEFAULT_SETTINGS.stun.join("\n"));
             }}
           >
-            Reset
+            {t("reset")}
           </button>
         </div>
       </form>

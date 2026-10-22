@@ -961,8 +961,15 @@ fieldset.field input + input {
 }
 
 @media (max-width: 520px) {
+  .chat-head {
+    gap: 4px;
+  }
   .chat-head .ttl select {
-    max-width: 92px;
+    max-width: 72px;
+    padding: 4px;
+  }
+  .chat-head .e2e-note {
+    display: none;
   }
   .card {
     padding: 16px;

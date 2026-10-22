@@ -1,5 +1,5 @@
 /**
- * Generates the PWA icons (PNG + SVG) from the Veil mark, with no image
+ * Generates the PWA icons (PNG + SVG) from the hush mark, with no image
  * dependency: shapes are rasterized with 4×4 supersampling and written by a
  * minimal PNG encoder. Run with `bun scripts/icons.ts`; output is committed.
  */
@@ -8,12 +8,16 @@ import { join, resolve } from "node:path";
 import { deflateSync } from "node:zlib";
 
 const OUT = resolve(import.meta.dir, "../public/icons");
-const BG: [number, number, number] = [18, 122, 114];
-const FG: [number, number, number] = [250, 253, 252];
+const BG: [number, number, number] = [91, 69, 196];
+const FG: [number, number, number] = [250, 250, 255];
 
-// Geometry on the 32-unit grid of the in-app logo.
-const ARC = { cx: 16, cy: 23.425, r: 12.675, x0: 7, x1: 25, width: 2.2 };
-const RING = { cx: 16, cy: 17.5, r: 6.5, width: 2, alpha: 0.55 };
+// Geometry on the 32-unit grid of the in-app logo (src/ui/components/Icons.tsx).
+const BUBBLE = { cx: 16, cy: 14, hx: 8, hy: 6, r: 3, width: 2 };
+const TAIL: [number, number, number, number][] = [
+  [12, 20, 11, 23.5],
+  [11, 23.5, 15, 20],
+];
+const MOUTH = { x0: 12.5, x1: 19.5, y: 14, width: 2.2 };
 
 function crc32(buf: Uint8Array): number {
   let c = ~0;
@@ -60,6 +64,13 @@ function png(size: number, rgba: Uint8Array): Uint8Array {
   return out;
 }
 
+function segment(x: number, y: number, [ax, ay, bx, by]: [number, number, number, number]): number {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy)));
+  return Math.hypot(x - (ax + t * dx), y - (ay + t * dy));
+}
+
 /** Coverage of the mark at a point of the 32-grid: [background, foreground alpha]. */
 function sample(x: number, y: number, rounded: boolean): [number, number] {
   let bg = 1;
@@ -69,19 +80,14 @@ function sample(x: number, y: number, rounded: boolean): [number, number] {
     const qy = Math.max(Math.abs(y - 16) - (16 - r), 0);
     if (Math.hypot(qx, qy) > r) bg = 0;
   }
-  let fg = 0;
-  const d = Math.hypot(x - RING.cx, y - RING.cy);
-  if (Math.abs(d - RING.r) <= RING.width / 2) fg = RING.alpha;
-  // Upper arc between the two end points, with round caps.
-  const da = Math.hypot(x - ARC.cx, y - ARC.cy);
-  // Clip along the curve: project the point onto the circle before testing the end points.
-  const projX = ARC.cx + ((x - ARC.cx) * ARC.r) / (da || 1);
-  const onArc =
-    projX >= ARC.x0 && projX <= ARC.x1 && y < ARC.cy && Math.abs(da - ARC.r) <= ARC.width / 2;
-  const capY = 14.5;
-  const cap =
-    Math.min(Math.hypot(x - ARC.x0, y - capY), Math.hypot(x - ARC.x1, y - capY)) <= ARC.width / 2;
-  if (onArc || cap) fg = 1;
+  // Rounded-rectangle outline of the bubble (signed distance), open where the tail starts.
+  const qx = Math.abs(x - BUBBLE.cx) - (BUBBLE.hx - BUBBLE.r);
+  const qy = Math.abs(y - BUBBLE.cy) - (BUBBLE.hy - BUBBLE.r);
+  const d = Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - BUBBLE.r;
+  const inGap = y > BUBBLE.cy && x > 12.2 && x < 14.8;
+  let fg = Math.abs(d) <= BUBBLE.width / 2 && !inGap ? 1 : 0;
+  for (const s of TAIL) if (segment(x, y, s) <= BUBBLE.width / 2) fg = 1;
+  if (segment(x, y, [MOUTH.x0, MOUTH.y, MOUTH.x1, MOUTH.y]) <= MOUTH.width / 2) fg = 1;
   return [bg, fg];
 }
 
@@ -115,7 +121,7 @@ function render(size: number, opts: { rounded: boolean; scale: number }): Uint8A
   return png(size, rgba);
 }
 
-const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img"><title>Veil</title><rect width="32" height="32" rx="9" fill="rgb(${BG.join(",")})"/><circle cx="16" cy="17.5" r="6.5" fill="none" stroke="rgb(${FG.join(",")})" stroke-width="2" opacity="0.55"/><path d="M7 14.5c3.2-5 14.8-5 18 0" fill="none" stroke="rgb(${FG.join(",")})" stroke-width="2.2" stroke-linecap="round"/></svg>\n`;
+const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img"><title>hush</title><rect width="32" height="32" rx="9" fill="rgb(${BG.join(",")})"/><path d="M8 11a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v6a3 3 0 0 1-3 3h-6l-4 3.5V20a3 3 0 0 1-3-3z" fill="none" stroke="rgb(${FG.join(",")})" stroke-width="2" stroke-linejoin="round"/><path d="M12.5 14h7" stroke="rgb(${FG.join(",")})" stroke-width="2.2" stroke-linecap="round"/></svg>\n`;
 
 mkdirSync(OUT, { recursive: true });
 writeFileSync(join(OUT, "icon.svg"), svg);

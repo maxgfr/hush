@@ -66,11 +66,7 @@ export function Home(): JSX.Element {
         </li>
         <li>
           <Icon name="globe" size={18} />
-          <span>
-            {lang.value === "fr"
-              ? "Aucun serveur, aucun compte, aucune donnée gardée"
-              : "No server, no account, nothing kept"}
-          </span>
+          <span>{t("noServer")}</span>
         </li>
       </ul>
 

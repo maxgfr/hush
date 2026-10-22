@@ -3,7 +3,7 @@ import type { JSX } from "preact";
 import type { Chat } from "../../app/chat";
 import type { PeerConn } from "../../app/peer";
 import { sasEmojis } from "../../core/wasm";
-import { t } from "../i18n";
+import { sasName, t } from "../i18n";
 import { Icon } from "./Icons";
 
 export function Verify(props: { chat: Chat; peer: PeerConn }): JSX.Element | null {
@@ -23,12 +23,12 @@ export function Verify(props: { chat: Chat; peer: PeerConn }): JSX.Element | nul
       </div>
       <p class="hint">{t("verifyHint", { name })}</p>
       <ol class="sas" data-testid="sas">
-        {emojis.map(([e, n]) => (
-          <li key={n}>
+        {emojis.map(([e, n], i) => (
+          <li key={`${i}-${n}`}>
             <span class="sas-emoji" aria-hidden="true">
               {e}
             </span>
-            <span class="sas-name">{n}</span>
+            <span class="sas-name">{sasName(peer.sas?.[i] ?? 0, n)}</span>
           </li>
         ))}
       </ol>

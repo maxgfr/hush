@@ -3,6 +3,9 @@ import { signal } from "@preact/signals";
 
 const fr = {
   tagline: "Parlez sans laisser de trace.",
+  noServer: "Aucun serveur, aucun compte, rien de conservé",
+  reset: "Réinitialiser",
+  saved: "Enregistré",
   intro:
     "Créez un lien, envoyez-le, discutez. Chiffré de bout en bout avec une cryptographie post-quantique, sans compte ni serveur. Quand vous terminez, tout disparaît.",
   newConversation: "Nouvelle conversation",
@@ -81,6 +84,7 @@ const fr = {
   sending: "Préparation…",
   fileFailed: "Échec : fichier corrompu ou connexion perdue.",
   timerOff: "Désactivé",
+  timerOffShort: "aucun",
   timerLabel: "Minuteur : {t}",
   invite: "Inviter",
   members: "{n} participants",
@@ -184,6 +188,9 @@ export type Key = keyof typeof fr;
 
 const en: Record<Key, string> = {
   tagline: "Talk without leaving a trace.",
+  noServer: "No server, no account, nothing kept",
+  reset: "Reset",
+  saved: "Saved",
   intro:
     "Create a link, send it, talk. End-to-end encrypted with post-quantum cryptography, no account, no server. When you end it, everything is gone.",
   newConversation: "New conversation",
@@ -259,6 +266,7 @@ const en: Record<Key, string> = {
   sending: "Preparing…",
   fileFailed: "Failed: corrupt file or lost connection.",
   timerOff: "Off",
+  timerOffShort: "off",
   timerLabel: "Timer: {t}",
   invite: "Invite",
   members: "{n} people",
@@ -352,6 +360,79 @@ const en: Record<Key, string> = {
 };
 
 const dicts = { fr, en } as const;
+
+/** French names of the SAS emojis, in the core's order (crates/hush-core/src/sas.rs). */
+const SAS_FR = [
+  "Chien",
+  "Chat",
+  "Lion",
+  "Cheval",
+  "Licorne",
+  "Cochon",
+  "Éléphant",
+  "Lapin",
+  "Panda",
+  "Coq",
+  "Pingouin",
+  "Tortue",
+  "Poisson",
+  "Pieuvre",
+  "Papillon",
+  "Fleur",
+  "Arbre",
+  "Cactus",
+  "Champignon",
+  "Globe",
+  "Lune",
+  "Nuage",
+  "Feu",
+  "Banane",
+  "Pomme",
+  "Fraise",
+  "Maïs",
+  "Pizza",
+  "Gâteau",
+  "Cœur",
+  "Sourire",
+  "Robot",
+  "Chapeau",
+  "Lunettes",
+  "Clé à molette",
+  "Père Noël",
+  "Pouce",
+  "Parapluie",
+  "Sablier",
+  "Réveil",
+  "Cadeau",
+  "Ampoule",
+  "Livre",
+  "Crayon",
+  "Trombone",
+  "Ciseaux",
+  "Cadenas",
+  "Clé",
+  "Marteau",
+  "Téléphone",
+  "Drapeau",
+  "Train",
+  "Vélo",
+  "Avion",
+  "Fusée",
+  "Trophée",
+  "Ballon",
+  "Guitare",
+  "Trompette",
+  "Cloche",
+  "Ancre",
+  "Casque",
+  "Dossier",
+  "Punaise",
+];
+
+/** The spoken name of a SAS emoji, in the interface language. */
+export function sasName(index: number, english: string): string {
+  return lang.value === "fr" ? (SAS_FR[index & 63] ?? english) : english;
+}
 export type Lang = keyof typeof dicts;
 
 function initial(): Lang {
@@ -392,8 +473,8 @@ export function duration(ms: number): string {
   return `${Math.round(m / 1440)} ${day}`;
 }
 
-export function ttlLabel(seconds: number): string {
-  if (!seconds) return t("timerOff");
+export function ttlLabel(seconds: number, short = false): string {
+  if (!seconds) return short ? t("timerOffShort") : t("timerOff");
   const fr = lang.value === "fr";
   if (seconds < 60) return `${seconds} s`;
   if (seconds < 3600) return `${seconds / 60} min`;

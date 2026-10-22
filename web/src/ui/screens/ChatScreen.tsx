@@ -250,7 +250,7 @@ export function ChatScreen(props: { chat: Chat }): JSX.Element {
           <h1>{open || chat.group ? title : "hush"}</h1>
           <div class="chat-sub">
             {open && !chat.group && peers[0] && <PeerBadge peer={peers[0]} />}
-            <span class="faint">{t("e2ePq")}</span>
+            <span class="faint e2e-note">{t("e2ePq")}</span>
           </div>
         </div>
         <div class="row">
@@ -263,7 +263,7 @@ export function ChatScreen(props: { chat: Chat }): JSX.Element {
             >
               {TTL_SECONDS.map((s) => (
                 <option key={s} value={s}>
-                  {ttlLabel(s)}
+                  {ttlLabel(s, true)}
                 </option>
               ))}
             </select>
