@@ -21,15 +21,24 @@ else
   XCODE=0
   TARGETS=$MAC
 fi
+# libc 0.2.190 made SYSPROTO_CONTROL macOS-only, which breaks nix 0.31 (under webrtc) on iOS.
+# Until either is fixed, build with libc 0.2.189 and leave Cargo.lock as it was.
+LOCKED=--locked
+if [ "$XCODE" = 1 ] && grep -q '^version = "0.2.19[0-9]"' <(grep -A1 '^name = "libc"$' Cargo.lock); then
+  mkdir -p "$ROOT/target" && cp Cargo.lock "$ROOT/target/Cargo.lock.ios-orig"
+  trap 'mv "$ROOT/target/Cargo.lock.ios-orig" "$ROOT/Cargo.lock"' EXIT
+  cargo update -p libc --precise 0.2.189
+  LOCKED=
+fi
 for t in $TARGETS; do
   IPHONEOS_DEPLOYMENT_TARGET=17.0 MACOSX_DEPLOYMENT_TARGET=14.0 \
-    cargo build -p hush-ffi --profile "$PROFILE" --target "$t" --locked
+    cargo build -p hush-ffi --profile "$PROFILE" --target "$t" $LOCKED
 done
 
 # UniFFI reads the bindings' metadata from the Mac build of the same crate.
 GEN="$ROOT/target/uniffi-swift"
 rm -rf "${GEN:?}" && mkdir -p "$GEN"
-cargo run -p hush-ffi --features cli --bin uniffi-bindgen --locked -- \
+cargo run -p hush-ffi --features cli --bin uniffi-bindgen $LOCKED -- \
   generate --library "target/$MAC/$PROFILE/libhush_ffi.dylib" --language swift --out-dir "$GEN"
 
 HEADERS="$GEN/headers"

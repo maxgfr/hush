@@ -31,7 +31,8 @@ struct ChatView: View {
                     content(chat)
                 }
             } else {
-                ContentUnavailableView("ended", systemImage: "checkmark.circle")
+                // Joining: the engine's first event is on its way.
+                ProgressView()
             }
         }
         .onAppear { store.setVisible(chatId) }
