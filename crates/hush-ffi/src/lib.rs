@@ -6,9 +6,9 @@
 //! and small packets (GATT). Generate the bindings with:
 //!
 //! ```sh
-//! cargo build -p hush-ffi --release
+//! cargo build -p hush-ffi --profile ffi
 //! cargo run -p hush-ffi --features cli --bin uniffi-bindgen -- generate \
-//!   --library target/release/libhush_ffi.dylib --language kotlin --out-dir bindings/kotlin
+//!   --library target/ffi/libhush_ffi.dylib --language kotlin --out-dir bindings/kotlin
 //! ```
 #![forbid(unsafe_code)]
 

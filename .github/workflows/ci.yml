@@ -39,9 +39,9 @@ jobs:
       - run: cargo build -p hush-wasm --profile wasm --target wasm32-unknown-unknown --locked
       - name: Kotlin and Swift bindings generate
         run: |
-          cargo build -p hush-ffi --release --locked
-          cargo run -p hush-ffi --features cli --bin uniffi-bindgen --locked -- generate --library target/release/libhush_ffi.so --language kotlin --out-dir bindings/kotlin --no-format
-          cargo run -p hush-ffi --features cli --bin uniffi-bindgen --locked -- generate --library target/release/libhush_ffi.so --language swift --out-dir bindings/swift
+          cargo build -p hush-ffi --profile ffi --locked
+          cargo run -p hush-ffi --features cli --bin uniffi-bindgen --locked -- generate --library target/ffi/libhush_ffi.so --language kotlin --out-dir bindings/kotlin --no-format
+          cargo run -p hush-ffi --features cli --bin uniffi-bindgen --locked -- generate --library target/ffi/libhush_ffi.so --language swift --out-dir bindings/swift
           ls -R bindings
 
   web:

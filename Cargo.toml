@@ -20,3 +20,8 @@ panic = "abort"
 [profile.wasm]
 inherits = "release"
 opt-level = "z"
+
+# Mobile libraries: UniFFI reads its metadata from the library's symbols, so it must not be stripped.
+[profile.ffi]
+inherits = "release"
+strip = false

@@ -19,11 +19,11 @@ The protocol is ready for that. Its handshakes and sessions never depend on WebR
 Generate the bindings:
 
 ```sh
-cargo build -p hush-ffi --release
+cargo build -p hush-ffi --profile ffi
 cargo run -p hush-ffi --features cli --bin uniffi-bindgen -- generate \
-  --library target/release/libhush_ffi.dylib --language kotlin --out-dir bindings/kotlin
+  --library target/ffi/libhush_ffi.dylib --language kotlin --out-dir bindings/kotlin
 cargo run -p hush-ffi --features cli --bin uniffi-bindgen -- generate \
-  --library target/release/libhush_ffi.dylib --language swift --out-dir bindings/swift
+  --library target/ffi/libhush_ffi.dylib --language swift --out-dir bindings/swift
 ```
 
 For Android, build with `cargo ndk` for each ABI. For iOS, build a static library per target and wrap it in an XCFramework.
