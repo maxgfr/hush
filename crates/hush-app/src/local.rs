@@ -21,6 +21,9 @@ pub const MAX_LINKS: usize = 8;
 pub const MAX_INVALID: u32 = 32;
 /// Bytes handed to the app and not yet written, beyond which file chunks wait.
 pub const MAX_QUEUED: usize = 1 << 20;
+/// A link that has carried nothing authentic by then is closed: a neighbour cannot hold the
+/// few link slots with silent connections.
+pub const IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// The link misbehaved and must be closed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,6 +42,9 @@ pub struct LocalLink {
     pub peer: Option<(ChatId, PeerTag)>,
     /// The channel we dialed this link for (none when the other side dialed).
     pub dialed_for: Option<ChannelId>,
+    opened: std::time::Instant,
+    /// Something authentic (an envelope that opened, or a peer's session) came over it.
+    pub useful: bool,
 }
 
 impl LocalLink {
@@ -58,7 +64,14 @@ impl LocalLink {
             queued: 0,
             peer: None,
             dialed_for,
+            opened: std::time::Instant::now(),
+            useful: false,
         }
+    }
+
+    /// Open for a while without carrying anything authentic.
+    pub fn idle(&self) -> bool {
+        !self.useful && self.peer.is_none() && self.opened.elapsed() >= IDLE_TIMEOUT
     }
 
     /// The writes that carry one record: one buffer for a stream, one per packet otherwise.

@@ -600,6 +600,10 @@ impl Engine {
             }
         }
         self.contacts_tick();
+        let idle: Vec<LinkId> = self.links.iter().filter(|(_, l)| l.idle()).map(|(id, _)| *id).collect();
+        for link in idle {
+            self.close_link(link);
+        }
         self.refresh_discovery();
         let ended: Vec<ChatId> = self.chats.iter().filter(|(_, c)| c.ended).map(|(id, _)| *id).collect();
         for id in ended {
@@ -1962,7 +1966,12 @@ impl Engine {
         for (lane, payload) in records {
             if lane == hush_core::stream::SIGNAL_LANE {
                 match self.rdv.open_local(link, &payload) {
-                    Some((ch, env)) => self.on_envelope(ch, env, Via::Local(link)),
+                    Some((ch, env)) => {
+                        if let Some(l) = self.links.get_mut(&link) {
+                            l.useful = true;
+                        }
+                        self.on_envelope(ch, env, Via::Local(link));
+                    }
                     None => self.strike(link),
                 }
                 continue;

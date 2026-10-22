@@ -253,4 +253,4 @@ Tokens derive from the envelope key, not the topic, so a relay cannot recognize 
 - Lane 255 carries signaling: `topic(32) ‖ envelope`, the envelopes of §2, exactly as a relay would carry them. Handshakes run on it, and a peer whose handshake came over the link (or was heard on it) gets its session frames on the same link.
 - Lanes 0 to 3 carry that peer's session frames (§4). When a handshake runs over a nearby link, the hello payloads carry no `sdp`: no WebRTC is set up.
 
-**Limits.** Each device keeps at most 8 nearby links. A link that sends more than 32 records that fail to open is closed.
+**Limits.** Each device keeps at most 8 nearby links. A link that sends more than 32 records that fail to open is closed, and so is one that carries nothing authentic within 30 seconds.
