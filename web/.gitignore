@@ -1,0 +1,5 @@
+node_modules/
+dist/
+src/core/pkg/
+test-results/
+playwright-report/

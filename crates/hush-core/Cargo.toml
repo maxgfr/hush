@@ -1,0 +1,33 @@
+[package]
+name = "hush-core"
+description = "Sans-IO post-quantum protocol core of hush: handshakes, ratchet, framing, identities, vault and backups"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+x-wing = { version = "=0.1.1", features = ["zeroize"] }
+ml-dsa = { version = "=0.1.1", default-features = false, features = ["alloc", "rand_core", "zeroize"] }
+ed25519-dalek = { version = "=3.0.0", default-features = false, features = ["zeroize"] }
+chacha20poly1305 = { version = "=0.11.0", default-features = false, features = ["alloc"] }
+hkdf = "=0.13.0"
+hmac = "=0.13.0"
+sha2 = { version = "=0.11.1", default-features = false }
+argon2 = { version = "=0.6.0", default-features = false, features = ["alloc", "zeroize"] }
+zeroize = { version = "=1.9.1", features = ["derive"] }
+bech32 = "=0.12.0"
+rand_core = "=0.10.1"
+unicode-normalization = { version = "0.1", optional = true }
+
+[features]
+default = ["nfkc", "fast"]
+# NFKC-normalizes passphrases. The web build leaves it out (its tables weigh ~100 KB) and
+# normalizes in JavaScript with String.prototype.normalize("NFKC") instead.
+nfkc = ["dep:unicode-normalization"]
+# Precomputed Ed25519 base-point tables: faster signing, ~30 KB larger.
+fast = ["ed25519-dalek/fast"]
+
+[dev-dependencies]
+getrandom = { version = "=0.4.3", features = ["sys_rng"] }
