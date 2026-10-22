@@ -1,0 +1,94 @@
+# The iOS app. `xcodegen generate` makes Hush.xcodeproj (not committed); the engine comes from the
+# local HushKit package, which links the XCFramework built by mobile/scripts/build-ios.sh.
+name: Hush
+options:
+  bundleIdPrefix: io.github.maxgfr
+  deploymentTarget:
+    iOS: "17.0"
+  developmentLanguage: en
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    LOCALIZATION_PREFERS_STRING_CATALOGS: YES
+    SWIFT_EMIT_LOC_STRINGS: YES
+packages:
+  HushKit:
+    path: HushKit
+targets:
+  Hush:
+    type: application
+    platform: iOS
+    sources:
+      - path: Hush
+        excludes:
+          - Info.plist
+    dependencies:
+      - package: HushKit
+        product: HushKit
+    info:
+      path: Hush/Info.plist
+      properties:
+        CFBundleDisplayName: hush
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleLocalizations: [en, fr]
+        LSRequiresIPhoneOS: true
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UISupportedInterfaceOrientations~ipad:
+          [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        NSBluetoothAlwaysUsageDescription: hush finds the people you talk to nearby over Bluetooth, with no network.
+        NSLocalNetworkUsageDescription: hush finds the people you talk to on the same Wi-Fi, or directly between iPhones.
+        NSBonjourServices: [_hush._tcp]
+        NSCameraUsageDescription: hush scans the QR code of a link.
+        # Best effort: iOS keeps nearby links up for a while in the background. Keep hush open.
+        UIBackgroundModes: [bluetooth-central, bluetooth-peripheral]
+        ITSAppUsesNonExemptEncryption: true
+    entitlements:
+      path: Hush/Hush.entitlements
+      properties:
+        # Opens https://maxgfr.github.io/hush/#… links (needs the site's apple-app-site-association).
+        com.apple.developer.associated-domains: [applinks:maxgfr.github.io]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.maxgfr.hush
+        PRODUCT_NAME: Hush
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ENABLE_PREVIEWS: YES
+  HushTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [HushTests]
+    dependencies:
+      - target: Hush
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.maxgfr.hush.tests
+  HushUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [HushUITests]
+    dependencies:
+      - target: Hush
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.maxgfr.hush.uitests
+schemes:
+  Hush:
+    build:
+      targets:
+        Hush: all
+        HushTests: [test]
+        HushUITests: [test]
+    test:
+      config: Debug
+      targets:
+        - HushTests
+        - HushUITests
