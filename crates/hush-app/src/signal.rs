@@ -13,6 +13,25 @@ use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
+
+/// The largest message a relay or tracker may send: one envelope, which carries at most one
+/// session record, in base64 inside JSON. A server cannot make us take in more at once.
+const MAX_SERVER_MESSAGE: usize = 4 * hush_core::stream::MAX_RECORD / 3 + 64 * 1024;
+
+type Socket = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
+async fn connect(url: &str) -> Option<Socket> {
+    let config = WebSocketConfig {
+        max_message_size: Some(MAX_SERVER_MESSAGE),
+        max_frame_size: Some(MAX_SERVER_MESSAGE),
+        ..Default::default()
+    };
+    let (ws, _) = tokio_tungstenite::connect_async_with_config(url, Some(config), false)
+        .await
+        .ok()?;
+    Some(ws)
+}
 
 pub const NOSTR_KIND: u64 = 21_918;
 pub const DEFAULT_RELAYS: [&str; 4] = [
@@ -95,9 +114,8 @@ pub fn spawn_nostr(url: String, inbound: Inbound) -> mpsc::UnboundedSender<OutCm
         let mut topics: HashMap<String, [u8; 32]> = HashMap::new();
         let mut attempt = 0u32;
         loop {
-            let conn =
-                tokio::time::timeout(Duration::from_secs(10), tokio_tungstenite::connect_async(url.as_str())).await;
-            let Ok(Ok((mut ws, _))) = conn else {
+            let conn = tokio::time::timeout(Duration::from_secs(10), connect(&url)).await;
+            let Ok(Some(mut ws)) = conn else {
                 if !wait_offline(&mut rx, &mut topics, backoff(attempt), key).await {
                     return;
                 }
@@ -163,9 +181,8 @@ pub fn spawn_tracker(url: String, peer_id: String, inbound: Inbound) -> mpsc::Un
         let mut topics: HashMap<String, [u8; 32]> = HashMap::new();
         let mut attempt = 0u32;
         loop {
-            let conn =
-                tokio::time::timeout(Duration::from_secs(10), tokio_tungstenite::connect_async(url.as_str())).await;
-            let Ok(Ok((mut ws, _))) = conn else {
+            let conn = tokio::time::timeout(Duration::from_secs(10), connect(&url)).await;
+            let Ok(Some(mut ws)) = conn else {
                 if !wait_offline(&mut rx, &mut topics, backoff(attempt), info_hash).await {
                     return;
                 }
