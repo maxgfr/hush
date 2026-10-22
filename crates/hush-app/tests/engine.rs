@@ -489,7 +489,8 @@ async fn a_request_by_identifier() {
         .await;
     let from = alice
         .ev
-        .wait("a request", |e| match e {
+        // The requester solves a proof of work first.
+        .wait_for("a request", std::time::Duration::from_secs(120), |e| match e {
             Event::Requests(list) if !list.is_empty() => Some(list[0].clone()),
             _ => None,
         })

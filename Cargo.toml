@@ -25,3 +25,16 @@ opt-level = "z"
 [profile.ffi]
 inherits = "release"
 strip = false
+
+# Tests and debug builds run the crypto at full speed: unoptimized SHA-256, Argon2 and ML-KEM make
+# proofs of work and vault unlocks take tens of seconds on CI runners.
+[profile.dev.package.sha2]
+opt-level = 3
+[profile.dev.package.argon2]
+opt-level = 3
+[profile.dev.package.blake2]
+opt-level = 3
+[profile.dev.package.ml-kem]
+opt-level = 3
+[profile.dev.package.ml-dsa]
+opt-level = 3

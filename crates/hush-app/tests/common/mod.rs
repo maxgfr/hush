@@ -188,11 +188,21 @@ impl Events {
     }
 
     /// The first event (already seen or coming) that matches, within 30 s.
-    pub async fn wait<T>(&mut self, what: &str, mut pick: impl FnMut(&Event) -> Option<T>) -> T {
+    pub async fn wait<T>(&mut self, what: &str, pick: impl FnMut(&Event) -> Option<T>) -> T {
+        self.wait_for(what, Duration::from_secs(30), pick).await
+    }
+
+    /// `wait` with its own patience (a proof of work takes a while in a debug build on CI).
+    pub async fn wait_for<T>(
+        &mut self,
+        what: &str,
+        patience: Duration,
+        mut pick: impl FnMut(&Event) -> Option<T>,
+    ) -> T {
         if let Some(t) = self.seen.iter().find_map(&mut pick) {
             return t;
         }
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        let deadline = tokio::time::Instant::now() + patience;
         loop {
             let ev = tokio::time::timeout_at(deadline, self.rx.recv())
                 .await
