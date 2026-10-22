@@ -28,6 +28,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.maxgfr.hush.core.LinkInput
 import io.github.maxgfr.hush.ui.MainViewModel
 import io.github.maxgfr.hush.ui.Screen
+import io.github.maxgfr.hush.ui.components.ClipboardExpiry
+import io.github.maxgfr.hush.ui.components.NoKeyboardLearning
 import io.github.maxgfr.hush.ui.screens.ChatScreen
 import io.github.maxgfr.hush.ui.screens.ContactsScreen
 import io.github.maxgfr.hush.ui.screens.EndedScreen
@@ -48,7 +50,12 @@ class MainActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         enableEdgeToEdge()
         if (savedInstanceState == null) handle(intent)
-        setContent { HushTheme { Root(vm) } }
+        setContent { HushTheme { NoKeyboardLearning { Root(vm) } } }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) ClipboardExpiry.check(this)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -56,14 +63,14 @@ class MainActivity : ComponentActivity() {
         handle(intent)
     }
 
-    /** A hush link opened from a browser or messenger, or shared as text. */
+    /** A hush link opened from a browser or messenger, or shared as text: offered, not joined. */
     private fun handle(intent: Intent?) {
         val link = when (intent?.action) {
             Intent.ACTION_VIEW -> intent.dataString?.takeIf(LinkInput::isOurs)
             Intent.ACTION_SEND -> LinkInput.extract(intent.getStringExtra(Intent.EXTRA_TEXT))
             else -> null
         } ?: return
-        vm.openLink(link)
+        vm.offerLink(link)
     }
 }
 
@@ -85,7 +92,7 @@ private fun Root(vm: MainViewModel) {
             when (val s = vm.screen) {
                 Screen.Home -> HomeScreen(vm, state, settings)
                 Screen.New -> NewConversationScreen(vm, settings)
-                is Screen.Join -> JoinScreen(vm, s.error)
+                is Screen.Join -> JoinScreen(vm, s.error, s.link)
                 is Screen.Passphrase -> PassphraseScreen(vm, s.link)
                 is Screen.Chat -> ChatScreen(vm, state, settings, s.id)
                 is Screen.Ended -> EndedScreen(vm, s.reason, s.kept)

@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -87,9 +86,8 @@ fun IdentityScreen(vm: MainViewModel, state: UiState, settings: Settings) {
                 Section {
                     Hint(stringResource(R.string.id_intro))
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { QrCode(me) }
-                    SelectionContainer {
-                        Text(me, fontFamily = FontFamily.Monospace, modifier = Modifier.testTag("my-id"))
-                    }
+                    // Not selectable: the system's copy would skip the sensitive flag.
+                    Text(me, fontFamily = FontFamily.Monospace, modifier = Modifier.testTag("my-id"))
                     Button(onClick = {
                         copySensitive(context, "hush", me)
                         copied = true

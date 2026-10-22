@@ -242,6 +242,8 @@ private fun Busy(text: String) {
 @Composable
 private fun Backup(vm: MainViewModel) {
     var pass by remember { mutableStateOf("") }
+    var confirm by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<Int?>(null) }
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         if (uri != null) vm.exportBackup(pass, uri)
     }
@@ -253,17 +255,38 @@ private fun Backup(vm: MainViewModel) {
         Hint(stringResource(R.string.backup_intro))
         OutlinedTextField(
             value = pass,
-            onValueChange = { pass = it },
+            onValueChange = {
+                pass = it
+                error = null
+            },
             label = { Text(stringResource(R.string.backup_password)) },
             singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             modifier = Modifier.fillMaxWidth(),
         )
+        // The file can be copied anywhere and attacked offline: as strong as the vault, typed twice.
+        OutlinedTextField(
+            value = confirm,
+            onValueChange = {
+                confirm = it
+                error = null
+            },
+            label = { Text(stringResource(R.string.backup_password_confirm)) },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Hint(stringResource(R.string.vault_password_hint))
+        error?.let { ErrorText(stringResource(it)) }
         Row {
             OutlinedButton(onClick = {
-                val day = SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).format(Date())
-                export.launch("hush-backup-$day.hush")
+                error = vm.backupPassphraseError(pass, confirm)
+                if (error == null) {
+                    val day = SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).format(Date())
+                    export.launch("hush-backup-$day.hush")
+                }
             }, enabled = pass.isNotEmpty() && !vm.busy) { Text(stringResource(R.string.backup_export)) }
             Spacer(Modifier.width(8.dp))
             OutlinedButton(onClick = { import.launch(arrayOf("*/*")) }, enabled = pass.isNotEmpty() && !vm.busy) {

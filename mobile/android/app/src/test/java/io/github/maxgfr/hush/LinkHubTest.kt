@@ -44,13 +44,42 @@ class LinkHubTest {
     }
 
     @Test
-    fun aTokenIsDialedOnceAtATime() {
+    fun anEndpointIsDialedOnceAtATime() {
         val hub = LinkHub(Recorder())
-        assertTrue(hub.claim("aa"))
-        assertFalse(hub.claim("aa"))
-        hub.release("aa")
-        assertTrue(hub.claim("aa"))
-        assertTrue(hub.claim("bb"))
+        assertFalse(hub.busy("aa"))
+        assertTrue(hub.claim("aa", "ble:1"))
+        assertFalse(hub.claim("aa", "ble:1"))
+        assertTrue(hub.busy("aa"))
+        hub.release("aa", "ble:1")
+        assertFalse(hub.busy("aa"))
+        assertTrue(hub.claim("aa", "ble:1"))
+        assertTrue(hub.claim("bb", "ble:1"))
+        assertFalse(hub.busy("a"))
+    }
+
+    @Test
+    fun aCopiedTokenElsewhereDoesNotBlockTheRealDevice() {
+        val sink = Recorder()
+        val hub = LinkHub(sink)
+        val token = ByteArray(16) { 3 }
+        val hex = Tokens.toHex(token)
+        // Someone advertises the token they overheard, and we dial them first.
+        assertTrue(hub.claim(hex, "p2p:fake"))
+        val id = hub.newId()
+        val remote = PipedOutputStream()
+        val input = PipedInputStream(remote)
+        StreamLink(hub, id, input, ByteArrayOutputStream(), Closeable { input.close() }).start(Medium.WIFI, token, "p2p:fake")
+        assertEquals("opened $id Stream WIFI $hex", sink.next())
+        assertFalse(hub.claim(hex, "p2p:fake"))
+        // The real device, heard over Bluetooth and the local network, is still dialed.
+        assertTrue(hub.claim(hex, "ble:real"))
+        assertTrue(hub.claim(hex, "tcp:10.0.0.2:4000"))
+        // A late release of an endpoint whose link is open leaves that link's claim alone.
+        hub.release(hex, "p2p:fake")
+        assertFalse(hub.claim(hex, "p2p:fake"))
+        hub.close(id)
+        assertEquals("closed $id", sink.next())
+        assertTrue(hub.claim(hex, "p2p:fake"))
     }
 
     @Test
@@ -58,16 +87,16 @@ class LinkHubTest {
         val sink = Recorder()
         val hub = LinkHub(sink)
         val token = ByteArray(16) { 7 }
-        assertTrue(hub.claim(Tokens.toHex(token)))
+        assertTrue(hub.claim(Tokens.toHex(token), "tcp:peer"))
         val remote = PipedOutputStream()
         val input = PipedInputStream(remote)
         val output = ByteArrayOutputStream()
         val id = hub.newId()
         val link = StreamLink(hub, id, input, output, Closeable { input.close() })
-        link.start(Medium.WIFI, token)
+        link.start(Medium.WIFI, token, "tcp:peer")
         assertEquals("opened $id Stream WIFI ${Tokens.toHex(token)}", sink.next())
-        // While the link is open, nobody dials that token again.
-        assertFalse(hub.claim(Tokens.toHex(token)))
+        // While the link is open, nobody dials that endpoint again.
+        assertFalse(hub.claim(Tokens.toHex(token), "tcp:peer"))
 
         remote.write(byteArrayOf(1, 2, 3))
         remote.flush()
@@ -82,6 +111,7 @@ class LinkHubTest {
         assertEquals("closed $id", sink.next())
         assertEquals(null, sink.events.poll(300, TimeUnit.MILLISECONDS))
         assertEquals(0, hub.count)
-        assertTrue(hub.claim(Tokens.toHex(token)))
+        assertFalse(hub.busy(Tokens.toHex(token)))
+        assertTrue(hub.claim(Tokens.toHex(token), "tcp:peer"))
     }
 }

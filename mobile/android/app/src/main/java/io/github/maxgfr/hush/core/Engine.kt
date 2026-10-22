@@ -6,6 +6,8 @@ import io.github.maxgfr.hush.nearby.LinkHub
 import io.github.maxgfr.hush.nearby.Nearby
 import io.github.maxgfr.hush.nearby.NearbyTransport
 import java.io.File
+import uniffi.hush_ffi.AppEvent
+import uniffi.hush_ffi.AppListener
 import uniffi.hush_ffi.HushApp
 import uniffi.hush_ffi.defaultIceServers
 import uniffi.hush_ffi.defaultRelays
@@ -28,7 +30,7 @@ class Engine(context: Context) {
     val receivedDir: File
 
     /** Copies of the files we offer, which the engine reads when someone downloads them. */
-    val outgoingDir: File
+    private val outgoingDir: File
 
     init {
         val ctx = context.applicationContext
@@ -47,9 +49,19 @@ class Engine(context: Context) {
         }
         val sink = EngineSink()
         nearby = Nearby.transport(ctx, LinkHub(sink))
-        app = HushApp(settings.state.value.config(receivedDir.path, dataDir.path), store, nearby)
+        val listener = object : AppListener {
+            override fun onEvent(event: AppEvent) {
+                // The copies offered in a conversation go with it, not at the next launch.
+                if (event is AppEvent.ChatEnded) outgoingFor(event.chat).deleteRecursively()
+                store.onEvent(event)
+            }
+        }
+        app = HushApp(settings.state.value.config(receivedDir.path, dataDir.path), listener, nearby)
         sink.attach(app)
     }
+
+    /** Where the copies of the files offered in [chat] go. */
+    fun outgoingFor(chat: ULong): File = File(outgoingDir, chat.toString())
 
     fun applyNetwork(s: Settings) = app.setNetwork(s.relays, s.trackers, s.iceServers(), s.relayOnly)
 }

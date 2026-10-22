@@ -39,6 +39,7 @@
     <string name="connecting">Établissement de la connexion chiffrée…</string>
 
     <string name="paste_link">Collez le lien reçu</string>
+    <string name="link_from_app">Un lien venu d\'une autre application. Vérifiez que c\'est celui attendu, puis touchez Rejoindre.</string>
     <string name="scan_qr">Scanner un QR code</string>
     <string name="join">Rejoindre</string>
     <string name="invalid_link">Ce lien n\'est pas valide.</string>
@@ -160,6 +161,7 @@
     <string name="backup_export">Exporter une sauvegarde</string>
     <string name="backup_import">Importer une sauvegarde</string>
     <string name="backup_password">Mot de passe de la sauvegarde</string>
+    <string name="backup_password_confirm">Confirmez le mot de passe (export seulement)</string>
     <string name="backup_bad">Mot de passe incorrect ou fichier modifié.</string>
     <string name="backup_saved">Sauvegarde enregistrée.</string>
 

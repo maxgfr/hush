@@ -58,29 +58,30 @@ class TcpServers(private val hub: LinkHub, private val address: InetAddress? = n
 /** Dials a device found for a token. */
 class TcpDialer(private val hub: LinkHub) {
     /**
-     * Connects to [host]:[port] for [token], on a thread of its own. [claimed]: the caller already
-     * holds the token's claim in the hub.
+     * Connects to [host]:[port] for [token], on a thread of its own. [claimed]: the endpoint the
+     * caller already holds the claim for in the hub; by default the dial claims host and port.
      */
     fun dial(
         host: InetAddress,
         port: Int,
         token: ByteArray,
-        claimed: Boolean = false,
+        claimed: String? = null,
         onClosed: () -> Unit = {},
     ) {
         val hex = Tokens.toHex(token)
-        if (!claimed && !hub.claim(hex)) return
+        val endpoint = claimed ?: "tcp:${host.hostAddress}:$port"
+        if (claimed == null && !hub.claim(hex, endpoint)) return
         Thread({
             val socket = Socket()
             try {
                 socket.connect(InetSocketAddress(host, port), CONNECT_TIMEOUT_MS)
-                Tcp.link(hub, socket, onClosed).start(Medium.WIFI, token)
+                Tcp.link(hub, socket, onClosed).start(Medium.WIFI, token, endpoint)
             } catch (ignored: IOException) {
                 try {
                     socket.close()
                 } catch (ignored: IOException) {
                 }
-                hub.release(hex)
+                hub.release(hex, endpoint)
                 onClosed()
             }
         }, "hush-tcp-dial").apply { isDaemon = true }.start()

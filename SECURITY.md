@@ -95,7 +95,8 @@ Saved contacts were verified when they were saved, and reconnect with a mutually
 
 The Android and iOS apps run the same engine as the CLI, natively (no JavaScript). Over Bluetooth and Wi-Fi they carry the same sealed envelopes and frames as the relays: a nearby link adds reach, not trust. See [docs/MOBILE.md](docs/MOBILE.md) for what stays on the phone, and what a nearby link reveals:
 - a rotating token while advertising;
-- a `_hush._tcp` service on a shared Wi-Fi network.
+- a `_hush._tcp` service on a shared Wi-Fi network;
+- on Android over Wi-Fi Direct, the phone's Wi-Fi Direct device name.
 
 ## Browser hardening
 

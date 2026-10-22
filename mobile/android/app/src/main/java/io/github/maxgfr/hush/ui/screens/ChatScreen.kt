@@ -3,6 +3,7 @@ package io.github.maxgfr.hush.ui.screens
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.webkit.MimeTypeMap
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -26,7 +27,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -67,6 +67,7 @@ import io.github.maxgfr.hush.core.ChatItem
 import io.github.maxgfr.hush.core.ChatState
 import io.github.maxgfr.hush.core.FileItem
 import io.github.maxgfr.hush.core.FileState
+import io.github.maxgfr.hush.core.FileTypes
 import io.github.maxgfr.hush.core.Format
 import io.github.maxgfr.hush.core.MessageItem
 import io.github.maxgfr.hush.core.NoticeItem
@@ -363,17 +364,16 @@ private fun ShareLink(chat: ChatState, now: Long) {
         Text(stringResource(R.string.send_this_link), style = MaterialTheme.typography.titleMedium)
         Hint(stringResource(R.string.send_this_link_hint))
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { QrCode(url) }
-        SelectionContainer {
-            Text(
-                url,
-                fontFamily = FontFamily.Monospace,
-                fontSize = 12.sp,
-                modifier = Modifier.testTag("share-link"),
-            )
-        }
+        // Not selectable: the system's copy would skip the sensitive flag and the clearing.
+        Text(
+            url,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 12.sp,
+            modifier = Modifier.testTag("share-link"),
+        )
         Row {
             Button(onClick = {
-                copySensitive(context, "hush", url)
+                copySensitive(context, "hush", url, expire = true)
                 copied = true
             }) {
                 HIcon(if (copied) R.drawable.ic_check else R.drawable.ic_copy)
@@ -517,7 +517,7 @@ private fun FileCard(vm: MainViewModel, chat: ChatState, f: FileItem) {
                     TextButton(onClick = { vm.cancelFile(chat.id, f.id) }) { Text(stringResource(R.string.cancel)) }
                 }
             }
-            FileState.SAVED -> Button(onClick = { f.path?.let { openFile(context, it, f.mime) } }) {
+            FileState.SAVED -> Button(onClick = { f.path?.let { openFile(context, it) } }) {
                 Text(stringResource(R.string.open))
             }
             FileState.SENDING ->
@@ -536,18 +536,23 @@ private fun FileCard(vm: MainViewModel, chat: ChatState, f: FileItem) {
     }
 }
 
-/** Hands a received file to another app, read-only, through the FileProvider. */
-private fun openFile(context: Context, path: String, mime: String) {
+/**
+ * Hands a received file to an app the user picks, read-only, through the FileProvider. Its type
+ * comes from its saved name, never from what the sender declared.
+ */
+private fun openFile(context: Context, path: String) {
+    val file = File(path)
     val uri = try {
-        FileProvider.getUriForFile(context, "${context.packageName}.files", File(path))
+        FileProvider.getUriForFile(context, "${context.packageName}.files", file)
     } catch (ignored: IllegalArgumentException) {
         return
     }
+    val type = FileTypes.forName(file.name) { MimeTypeMap.getSingleton().getMimeTypeFromExtension(it) }
     val view = Intent(Intent.ACTION_VIEW)
-        .setDataAndType(uri, mime.ifBlank { "application/octet-stream" })
+        .setDataAndType(uri, type)
         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     try {
-        context.startActivity(view)
+        context.startActivity(Intent.createChooser(view, context.getString(R.string.open)))
     } catch (ignored: ActivityNotFoundException) {
         Toast.makeText(context, R.string.no_app_to_open, Toast.LENGTH_SHORT).show()
     }
@@ -570,7 +575,8 @@ private fun noticeText(n: NoticeKind): String = when (n) {
 
 @Composable
 private fun Composer(onSend: (String) -> Unit, onAttach: () -> Unit) {
-    var text by rememberSaveable { mutableStateOf("") }
+    // Not saveable: a draft must not outlive the process in the saved instance state.
+    var text by remember { mutableStateOf("") }
     val send = {
         if (text.isNotBlank()) {
             onSend(text)

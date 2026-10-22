@@ -50,10 +50,19 @@ Everything in `SECURITY.md` holds. On top of it:
 - **Vault:** it lives in the app's private storage.
   - iOS: data protection `complete`, excluded from iCloud backups.
   - Android: `allowBackup="false"` and backup rules that exclude everything.
+- **Backups:** an exported backup can be copied anywhere and attacked offline, so on Android its passphrase follows the vault's rules: at least 10 characters, typed twice.
 - **Screens:** they are hidden from screenshots and the app switcher (Android `FLAG_SECURE`, iOS overlay when inactive).
 - **Logs:** no link, message, name or key is ever logged.
 - **Received files:** they stay in the app's private storage. They leave it only when you open or share one.
+  - Android opens one, in an app you pick, with the type of its own extension, never the type the sender declared. Web pages, SVG, XML, scripts, packages and unknown types go out as opaque files.
 - **Clipboard:** copied links are marked sensitive (Android) or local and expiring (iOS).
+  - Android clears a copied link after a minute, if it is still what the clipboard holds.
+  - The link and the identifier are not selectable: every copy goes through the Copy button.
+- **Keyboard (Android):** text fields ask the keyboard not to learn from what is typed (`IME_FLAG_NO_PERSONALIZED_LEARNING`), and link fields turn autocorrect off. Passphrases, pasted links and drafts are never kept in the saved instance state.
+- **Links from other apps:** a link opened from a browser or a messenger, or shared as text, only fills the Join screen. Nothing is joined until you tap Join.
+  - Android does not verify the app link (there is no `assetlinks.json` to publish), so a link opens in the app only if you pick it, and otherwise in the browser, which runs the web app.
+  - Either way the key is in the `#fragment`, which is never sent to the web server.
+- **Task hijacking:** the Android activity has no task affinity, so another app cannot slip its own screens into hush's task.
 - **Nearby links add reach, not trust:** they carry the same sealed envelopes and frames as the relays.
   - A link that keeps sending garbage is closed.
   - At most 8 are open at once.
@@ -61,6 +70,9 @@ Everything in `SECURITY.md` holds. On top of it:
 - **What a nearby link reveals:**
   - Someone scanning around you sees a random-looking token while the app advertises. It changes every 10 minutes, but not in step with the phone's Bluetooth address, so they could follow your phone while it advertises (Becker et al., PETS 2019).
   - On a shared Wi-Fi network, `_hush._tcp` shows that someone uses hush.
+  - While an Android phone advertises or scans over Wi-Fi Direct, it is discoverable under its Wi-Fi Direct device name (often the phone's model or its owner's name), next to `<token>._hush._tcp`. A neutral name in the Wi-Fi Direct settings avoids that.
+  - The token is sent in the clear, so anyone in range can advertise it too. They cannot finish the handshake without the link, and the app dials each device found on its own, so a copy cannot block the real one.
+  - Joining a Wi-Fi Direct group puts the phone on the network of the group's owner. Android only does it when Bluetooth and the local network found nothing for 15 s, one group at a time, and leaves the group as soon as its link closes.
 
 ## Building
 

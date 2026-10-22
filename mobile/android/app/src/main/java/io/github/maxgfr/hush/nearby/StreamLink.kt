@@ -25,8 +25,8 @@ class StreamLink(
     private val closed = AtomicBoolean(false)
 
     /** Registers the link with the engine, then starts moving bytes. */
-    fun start(medium: Medium, token: ByteArray?) {
-        hub.open(id, this, LinkKind.Stream, medium, token)
+    fun start(medium: Medium, token: ByteArray?, endpoint: String? = null) {
+        hub.open(id, this, LinkKind.Stream, medium, token, endpoint)
         Thread(::readLoop, "hush-link-$id-in").apply { isDaemon = true }.start()
         Thread(::writeLoop, "hush-link-$id-out").apply { isDaemon = true }.start()
     }

@@ -18,6 +18,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -43,7 +44,8 @@ fun NewConversationScreen(vm: MainViewModel, settings: Settings) {
     var group by rememberSaveable { mutableStateOf(false) }
     var ttlMin by rememberSaveable { mutableLongStateOf(60L) }
     var ttl by rememberSaveable { mutableLongStateOf(settings.ttl) }
-    var pass by rememberSaveable { mutableStateOf("") }
+    // Secrets are never saveable: the saved instance state outlives the process.
+    var pass by remember { mutableStateOf("") }
     val off = stringResource(R.string.timer_off)
     Page(stringResource(R.string.new_conversation), onBack = vm::back) {
         Section {
@@ -90,8 +92,8 @@ fun NewConversationScreen(vm: MainViewModel, settings: Settings) {
 }
 
 @Composable
-fun JoinScreen(vm: MainViewModel, error: Int?) {
-    var value by rememberSaveable { mutableStateOf("") }
+fun JoinScreen(vm: MainViewModel, error: Int?, link: String? = null) {
+    var value by remember(link) { mutableStateOf(link ?: "") }
     var scanning by rememberSaveable { mutableStateOf(false) }
     Page(stringResource(R.string.join_with_link), onBack = vm::back) {
         Section {
@@ -114,6 +116,7 @@ fun JoinScreen(vm: MainViewModel, error: Int?) {
                     modifier = Modifier.fillMaxWidth(),
                 )
                 error?.let { ErrorText(stringResource(it)) }
+                if (link != null && error == null) Hint(stringResource(R.string.link_from_app))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Button(onClick = { vm.openLink(value) }, enabled = value.isNotBlank() && !vm.busy) {
                         Text(stringResource(R.string.join))
@@ -132,7 +135,7 @@ fun JoinScreen(vm: MainViewModel, error: Int?) {
 
 @Composable
 fun PassphraseScreen(vm: MainViewModel, link: String) {
-    var pass by rememberSaveable { mutableStateOf("") }
+    var pass by remember { mutableStateOf("") }
     Page(stringResource(R.string.join_with_link), onBack = vm::back) {
         Section {
             Row(verticalAlignment = Alignment.CenterVertically) {

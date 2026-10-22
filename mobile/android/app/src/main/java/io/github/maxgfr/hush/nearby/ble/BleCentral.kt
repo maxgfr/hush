@@ -69,8 +69,9 @@ class BleCentral(
         val uuids = result.scanRecord?.serviceUuids ?: return
         val token = uuids.firstNotNullOfOrNull { wanted[it.uuid] } ?: return
         val hex = Tokens.toHex(token)
-        if (!hub.claim(hex)) return
-        Client(result.device, token, hex).connect()
+        val endpoint = "ble:${result.device.address}"
+        if (!hub.claim(hex, endpoint)) return
+        Client(result.device, token, hex, endpoint).connect()
     }
 
     /** One GATT connection to an advertiser, until it carries a link (or fails). */
@@ -78,6 +79,7 @@ class BleCentral(
         val device: BluetoothDevice,
         val token: ByteArray,
         val hex: String,
+        val endpoint: String,
     ) : BluetoothGattCallback() {
         private var gatt: BluetoothGatt? = null
         private var service: BluetoothGattService? = null
@@ -101,7 +103,7 @@ class BleCentral(
             if (failed || opened) return
             failed = true
             main.removeCallbacks(timeout)
-            hub.release(hex)
+            hub.release(hex, endpoint)
             gatt?.let {
                 runCatching { it.disconnect() }
                 runCatching { it.close() }
@@ -192,7 +194,7 @@ class BleCentral(
             StreamLink(hub, hub.newId(), socket.inputStream, socket.outputStream, socket) {
                 runCatching { g.disconnect() }
                 runCatching { g.close() }
-            }.start(Medium.BLUETOOTH, token)
+            }.start(Medium.BLUETOOTH, token, endpoint)
         }
 
         private fun usePackets(g: BluetoothGatt) {
@@ -222,7 +224,7 @@ class BleCentral(
                 main.removeCallbacks(timeout)
                 ClientLink(hub.newId(), g, rx).also { packets = it }
             }
-            hub.open(link.id, link, Gatt.packets(mtu), Medium.BLUETOOTH, token)
+            hub.open(link.id, link, Gatt.packets(mtu), Medium.BLUETOOTH, token, endpoint)
         }
 
         @Deprecated("Android 12 and older")

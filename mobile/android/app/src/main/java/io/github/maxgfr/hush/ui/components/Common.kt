@@ -6,7 +6,12 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.PersistableBundle
+import android.os.SystemClock
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -39,7 +44,11 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.InterceptPlatformTextInput
+import androidx.compose.ui.platform.PlatformTextInputInterceptor
+import androidx.compose.ui.platform.PlatformTextInputMethodRequest
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -147,9 +156,9 @@ private fun FlowRowChips(content: @Composable () -> Unit) {
 
 /**
  * Copies text, marked sensitive so Android 13+ keeps it out of the clipboard preview (and
- * keyboards that read it).
+ * keyboards that read it). [expire]: wipe it after a minute, if it is still what we copied.
  */
-fun copySensitive(context: Context, label: String, text: String) {
+fun copySensitive(context: Context, label: String, text: String, expire: Boolean = false) {
     val clip = ClipData.newPlainText(label, text)
     clip.description.extras = PersistableBundle().apply {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -159,6 +168,56 @@ fun copySensitive(context: Context, label: String, text: String) {
         }
     }
     context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(clip)
+    if (expire) ClipboardExpiry.start(context.applicationContext, text)
+}
+
+/** A copied link leaves the clipboard after a minute, like the expiring pasteboard on iOS. */
+object ClipboardExpiry {
+    private const val AFTER_MS = 60_000L
+    private val main = Handler(Looper.getMainLooper())
+    private var copied: String? = null
+    private var at = 0L
+
+    fun start(context: Context, text: String) {
+        copied = text
+        at = SystemClock.elapsedRealtime()
+        main.removeCallbacksAndMessages(this)
+        main.postDelayed({ check(context) }, this, AFTER_MS)
+    }
+
+    /**
+     * Clears the clipboard once the minute is over, unless something else was copied since.
+     * Only the app in focus may read the clipboard: a check missed in the background runs again
+     * when the app is back (MainActivity).
+     */
+    fun check(context: Context) {
+        val text = copied ?: return
+        if (SystemClock.elapsedRealtime() - at < AFTER_MS) return
+        val cm = context.getSystemService(ClipboardManager::class.java) ?: return
+        val clip = runCatching { cm.primaryClip }.getOrNull() ?: return
+        if (clip.itemCount > 0 && clip.getItemAt(0).text?.toString() == text) cm.clearPrimaryClip()
+        copied = null
+    }
+}
+
+/**
+ * Asks the keyboard not to learn from anything typed inside (IME_FLAG_NO_PERSONALIZED_LEARNING):
+ * messages, links and passphrases stay out of its suggestions and whatever it syncs.
+ */
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+fun NoKeyboardLearning(content: @Composable () -> Unit) {
+    val interceptor = PlatformTextInputInterceptor { request, next ->
+        next.startInputMethod(
+            object : PlatformTextInputMethodRequest {
+                override fun createInputConnection(outAttributes: EditorInfo): InputConnection =
+                    request.createInputConnection(outAttributes).also {
+                        outAttributes.imeOptions = outAttributes.imeOptions or EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
+                    }
+            },
+        )
+    }
+    InterceptPlatformTextInput(interceptor, content)
 }
 
 fun shareText(context: Context, text: String) {

@@ -42,6 +42,7 @@
     <string name="connecting">Setting up the encrypted connection…</string>
 
     <string name="paste_link">Paste the link you received</string>
+    <string name="link_from_app">A link from another app. Check it is the one you expect, then tap Join.</string>
     <string name="scan_qr">Scan a QR code</string>
     <string name="join">Join</string>
     <string name="invalid_link">This link is not valid.</string>
@@ -164,6 +165,7 @@
     <string name="backup_export">Export a backup</string>
     <string name="backup_import">Import a backup</string>
     <string name="backup_password">Backup passphrase</string>
+    <string name="backup_password_confirm">Confirm the passphrase (export only)</string>
     <string name="backup_bad">Wrong passphrase or modified file.</string>
     <string name="backup_saved">Backup saved.</string>
 

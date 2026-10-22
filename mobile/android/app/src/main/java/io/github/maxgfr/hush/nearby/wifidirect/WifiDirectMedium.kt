@@ -25,6 +25,9 @@ import io.github.maxgfr.hush.nearby.tcp.TcpDialer
  * here). The advertiser publishes a DNS-SD service named after the token's hex, with its TCP port
  * in the TXT record; the scanner asks to join that device's group, preferring it as group owner,
  * then dials the owner's address on that port.
+ *
+ * Joining a group puts this phone on the owner's network, on the word of a token anyone nearby
+ * can copy: the scanner only does it once Bluetooth and the local network found nothing.
  */
 @SuppressLint("MissingPermission") // Every entry point checks NearbyPermissions first.
 class WifiDirectMedium(
@@ -37,12 +40,14 @@ class WifiDirectMedium(
     private var channel: WifiP2pManager.Channel? = null
     private var receiver: BroadcastReceiver? = null
     @Volatile private var wanted: Map<String, ByteArray> = emptyMap()
+    // Token (hex) → when we started looking for it.
+    @Volatile private var since: Map<String, Long> = emptyMap()
     @Volatile private var advertising = false
     @Volatile private var pending: Pending? = null
     private var request: WifiP2pDnsSdServiceRequest? = null
     private var groupLinks = 0
 
-    private class Pending(val hex: String, val token: ByteArray, val port: Int, val since: Long)
+    private class Pending(val hex: String, val token: ByteArray, val port: Int, val endpoint: String)
 
     private fun ready(): WifiP2pManager.Channel? {
         val m = manager ?: return null
@@ -91,6 +96,8 @@ class WifiDirectMedium(
 
     private fun look(tokens: List<ByteArray>) {
         wanted = tokens.associateBy(Tokens::toHex)
+        val now = System.currentTimeMillis()
+        since = wanted.keys.associateWith { since[it] ?: now }
         val c = ready() ?: return
         val m = manager ?: return
         main.removeCallbacks(rediscover)
@@ -113,7 +120,6 @@ class WifiDirectMedium(
             val c = channel ?: return
             if (wanted.isEmpty()) return
             manager?.discoverServices(c, null)
-            pending?.let { if (System.currentTimeMillis() - it.since > CONNECT_TIMEOUT_MS) giveUp(it) }
             main.postDelayed(this, REDISCOVER_MS)
         }
     }
@@ -123,8 +129,15 @@ class WifiDirectMedium(
         val token = wanted[hex] ?: return
         val port = txt["port"]?.toIntOrNull() ?: return
         val c = channel ?: return
-        if (pending != null || !hub.claim(hex)) return
-        pending = Pending(hex, token, port, System.currentTimeMillis())
+        val start = since[hex] ?: return
+        if (System.currentTimeMillis() - start < FALLBACK_MS || hub.busy(hex)) return
+        // One group at a time: a new one would tear down the one carrying a link.
+        if (pending != null || groupLinks > 0) return
+        val endpoint = "p2p:${device.deviceAddress}"
+        if (!hub.claim(hex, endpoint)) return
+        val p = Pending(hex, token, port, endpoint)
+        pending = p
+        main.postDelayed({ giveUp(p) }, p, CONNECT_TIMEOUT_MS)
         val config = WifiP2pConfig().apply {
             deviceAddress = device.deviceAddress
             // The advertiser listens: it should own the group, so we know where to dial.
@@ -144,14 +157,17 @@ class WifiDirectMedium(
         manager?.requestConnectionInfo(c) { info ->
             if (info == null || !info.groupFormed || pending !== p) return@requestConnectionInfo
             pending = null
+            main.removeCallbacksAndMessages(p)
             val owner = info.groupOwnerAddress
             if (info.isGroupOwner || owner == null) {
                 // We own the group: we cannot tell the advertiser's address. Leave it to the next try.
-                hub.release(p.hex)
+                hub.release(p.hex, p.endpoint)
+                if (groupLinks == 0) manager?.removeGroup(c, null)
                 return@requestConnectionInfo
             }
             groupLinks++
-            dialer.dial(owner, p.port, p.token, claimed = true) { main.post(::linkClosed) }
+            // The dial and then its link hold the claim; either one ending ends the group.
+            dialer.dial(owner, p.port, p.token, claimed = p.endpoint) { main.post(::linkClosed) }
         }
     }
 
@@ -164,15 +180,19 @@ class WifiDirectMedium(
     }
 
     private fun giveUp(p: Pending) {
-        if (pending === p) pending = null
-        hub.release(p.hex)
+        if (pending !== p) return
+        pending = null
+        main.removeCallbacksAndMessages(p)
+        hub.release(p.hex, p.endpoint)
         channel?.let { manager?.cancelConnect(it, null) }
     }
 
     override fun stop() {
         main.post {
             main.removeCallbacks(rediscover)
+            pending?.let(::giveUp)
             wanted = emptyMap()
+            since = emptyMap()
             advertising = false
             val c = channel ?: return@post
             manager?.clearLocalServices(c, null)
@@ -190,5 +210,6 @@ class WifiDirectMedium(
     private companion object {
         const val REDISCOVER_MS = 20_000L
         const val CONNECT_TIMEOUT_MS = 30_000L
+        const val FALLBACK_MS = 15_000L
     }
 }

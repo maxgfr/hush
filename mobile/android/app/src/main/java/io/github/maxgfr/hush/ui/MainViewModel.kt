@@ -34,7 +34,8 @@ import uniffi.hush_ffi.linkInfo
 sealed interface Screen {
     data object Home : Screen
     data object New : Screen
-    data class Join(@StringRes val error: Int? = null) : Screen
+    /** [link]: one handed over by another app, shown for the user to join or not. */
+    data class Join(@StringRes val error: Int? = null, val link: String? = null) : Screen
     data class Passphrase(val link: String) : Screen
     data class Chat(val id: ULong) : Screen
     data class Ended(val reason: Ending, val kept: Boolean) : Screen
@@ -164,7 +165,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun showJoin(@StringRes error: Int) = showOn(Screen.Join(error))
+    /**
+     * A link another app handed over: any app can send one, so it only fills the Join screen and
+     * the user decides, rather than replacing the conversation on screen.
+     */
+    fun offerLink(input: String) {
+        val link = input.trim()
+        if (link.isEmpty()) return
+        showOn(Screen.Join(link = link))
+    }
+
+    // A link offered by another app stays in the field, to be corrected or dropped.
+    private fun showJoin(@StringRes error: Int) = showOn(Screen.Join(error, (screen as? Screen.Join)?.link))
 
     private fun showOn(s: Screen) {
         if (screen is Screen.Join || screen is Screen.Passphrase) replace(s) else go(s)
@@ -193,7 +205,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val name = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
                 if (c.moveToFirst()) c.getString(0) else null
             }
-            val dir = File(engine.outgoingDir, UUID.randomUUID().toString()).apply { mkdirs() }
+            val dir = File(engine.outgoingFor(chat), UUID.randomUUID().toString()).apply { mkdirs() }
             val file = File(dir, safeName(name))
             val ok = runCatching {
                 resolver.openInputStream(uri)?.use { input -> file.outputStream().use { input.copyTo(it) } } != null
@@ -300,7 +312,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun decline(id: String) = io { app.declineRequest(id) }
 
+    /** Why a passphrase cannot protect a new backup, or null: the vault's own rules. */
+    @StringRes
+    fun backupPassphraseError(passphrase: String, confirm: String): Int? = when {
+        passphrase.length < MIN_VAULT -> R.string.vault_too_short
+        passphrase != confirm -> R.string.vault_mismatch
+        else -> null
+    }
+
     fun exportBackup(passphrase: String, target: Uri) {
+        if (backupPassphraseError(passphrase, passphrase) != null) return
         viewModelScope.launch {
             busy = true
             val ok = withContext(Dispatchers.IO) {
