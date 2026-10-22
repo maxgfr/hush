@@ -44,6 +44,32 @@ jobs:
           cargo run -p hush-ffi --features cli --bin uniffi-bindgen --locked -- generate --library target/ffi/libhush_ffi.so --language swift --out-dir bindings/swift
           ls -R bindings
 
+  deny:
+    name: Dependencies (advisories, licenses, sources)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check advisories bans licenses sources
+
+  fuzz:
+    name: Fuzz the parsers (a minute each)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install nightly --profile minimal && cargo install cargo-fuzz --version 0.13.2 --locked
+      - name: Fuzz
+        working-directory: crates/hush-core/fuzz
+        run: |
+          for t in parsers framing handshake session; do
+            cargo +nightly fuzz run "$t" -- -max_total_time=60 -rss_limit_mb=4096
+          done
+
   web:
     name: Web (typecheck, lint, unit, build, size)
     runs-on: ubuntu-latest

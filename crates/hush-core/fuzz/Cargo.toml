@@ -1,0 +1,49 @@
+[package]
+name = "hush-core-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+hush-core = { path = ".." }
+getrandom = { version = "=0.4.3", features = ["sys_rng"] }
+rand_core = "=0.10.1"
+zeroize = "=1.9.1"
+
+# Not part of the main workspace: built with `cargo +nightly fuzz run <target>` from here.
+[workspace]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "parsers"
+path = "fuzz_targets/parsers.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "session"
+path = "fuzz_targets/session.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "framing"
+path = "fuzz_targets/framing.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "handshake"
+path = "fuzz_targets/handshake.rs"
+test = false
+doc = false
+bench = false

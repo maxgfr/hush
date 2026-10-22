@@ -6,3 +6,7 @@ web/test-results/
 web/playwright-report/
 .impeccable/
 .DS_Store
+crates/hush-core/fuzz/target/
+crates/hush-core/fuzz/corpus/
+crates/hush-core/fuzz/artifacts/
+crates/hush-core/fuzz/coverage/
