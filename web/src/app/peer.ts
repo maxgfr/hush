@@ -32,6 +32,12 @@ export class PeerConn {
   private readonly signal: Channel;
   private readonly timers: ReturnType<typeof setTimeout>[] = [];
   private closed = false;
+  /**
+   * Frames sealed before any path worked, sent once one does. Relayed right away, they could
+   * reach a peer not yet listening on the session's channel (it finishes the handshake last):
+   * a contact card sent then was lost.
+   */
+  private readonly queued: { lane: number; frame: Uint8Array }[] = [];
 
   constructor(
     readonly tag: Uint8Array,
@@ -91,6 +97,8 @@ export class PeerConn {
   private setState(s: PeerState): void {
     if (this.state.value === s) return;
     this.state.value = s;
+    if (s === "direct" || s === "relay")
+      for (const q of this.queued.splice(0)) void this.sendFrame(q.lane, q.frame);
     this.handlers.onState?.(this);
   }
 
@@ -102,7 +110,11 @@ export class PeerConn {
     await this.sendFrame(lane, frame);
   }
 
-  private async sendFrame(lane: number, frame: Uint8Array): Promise<void> {
+  private async sendFrame(lane: number, frame: Uint8Array, now = false): Promise<void> {
+    if (!now && this.state.value === "connecting" && this.queued.length < 256) {
+      this.queued.push({ lane, frame });
+      return;
+    }
     if (this.rtc?.isOpen) {
       try {
         await this.rtc.send(lane, frame);
@@ -133,7 +145,7 @@ export class PeerConn {
   end(): void {
     if (this.closed) return;
     const bye = this.session.close();
-    if (bye) void this.sendFrame(Lane.CTRL, bye);
+    if (bye) void this.sendFrame(Lane.CTRL, bye, true);
     // Give the farewell a moment to leave before tearing the link down.
     setTimeout(() => this.shutdown(false), 300);
     this.closed = true;

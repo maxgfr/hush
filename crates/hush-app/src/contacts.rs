@@ -84,6 +84,10 @@ pub enum Cmd {
         key: String,
         reply: Reply<Option<ChatId>>,
     },
+    /// Our identifier, created if needed (needs an unlocked vault).
+    EnsureIdentity {
+        reply: Reply<String>,
+    },
     SetReachable(bool),
     AddById {
         id: String,
@@ -379,6 +383,15 @@ impl Engine {
                     self.here(&key, None);
                 }
                 let _ = reply.send(Ok(live));
+            }
+            Cmd::EnsureIdentity { reply } => {
+                let name = self.name();
+                let r = self.store.ensure_identity(&name).map(|me| me.public().id());
+                if r.is_ok() {
+                    self.watch();
+                    self.emit(Event::Identity(self.me().map(|m| m.public().id())));
+                }
+                let _ = reply.send(r);
             }
             Cmd::SetReachable(on) => self.set_reachable(on),
             Cmd::AddById { id } => self.add_by_id(&id),

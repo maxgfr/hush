@@ -49,10 +49,20 @@ pub(crate) const PENDING_TIMEOUT: Duration = Duration::from_secs(45);
 /// Images that download by themselves, from verified peers, a few at a time.
 const AUTO_DOWNLOAD: u64 = 8 * 1024 * 1024;
 const AUTO_DOWNLOADS: usize = 3;
+/// Frames held for a peer until a path works.
+const MAX_QUEUED_FRAMES: usize = 256;
 
 pub(crate) type RtcTx = mpsc::UnboundedSender<RtcCmd>;
 pub(crate) type RtcKey = (ChatId, PeerTag);
 pub type Reply<T> = oneshot::Sender<Result<T>>;
+
+/// Closes a WebRTC link once the frames queued on it (a farewell) had time to leave.
+fn close_later(rtc: RtcTx) {
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let _ = rtc.send(RtcCmd::Close);
+    });
+}
 
 pub fn tag_hex(t: &PeerTag) -> String {
     hex::encode(t)
@@ -259,6 +269,9 @@ pub(crate) struct Peer {
     /// The contact secret, read as soon as it might be needed (the session can end any time).
     pub secret: Option<[u8; 32]>,
     pub offered: bool,
+    /// Frames sealed before any path worked: sent once one does. Relayed right away, they could
+    /// reach a peer not listening on the session's channel yet (it finishes the handshake last).
+    queued: Vec<(u8, Vec<u8>)>,
 }
 
 impl Peer {
@@ -1029,6 +1042,7 @@ impl Engine {
                 saving: false,
                 secret: None,
                 offered: false,
+                queued: Vec::new(),
             },
         );
         let group = c.group;
@@ -1096,8 +1110,15 @@ impl Engine {
         if path == p.path {
             return;
         }
-        if let Some(p) = self.chats.get_mut(&chat).and_then(|c| c.peers.get_mut(tag)) {
-            p.path = path;
+        let queued = match self.chats.get_mut(&chat).and_then(|c| c.peers.get_mut(tag)) {
+            Some(p) => {
+                p.path = path;
+                std::mem::take(&mut p.queued)
+            }
+            None => Vec::new(),
+        };
+        for (l, f) in queued {
+            self.send_frame(chat, tag, l, f);
         }
         self.emit(Event::PeerPath {
             chat,
@@ -1144,9 +1165,14 @@ impl Engine {
     }
 
     pub(crate) fn send_frame(&mut self, chat: ChatId, tag: &PeerTag, l: u8, frame: Vec<u8>) {
-        let Some(p) = self.chats.get(&chat).and_then(|c| c.peers.get(tag)) else {
+        let Some(p) = self.chats.get_mut(&chat).and_then(|c| c.peers.get_mut(tag)) else {
             return;
         };
+        if p.path == PathKind::Connecting && p.queued.len() < MAX_QUEUED_FRAMES {
+            p.queued.push((l, frame));
+            return;
+        }
+        let p = &self.chats[&chat].peers[tag];
         if let Some(link) = p.local
             && self.links.contains_key(&link)
         {
@@ -1203,8 +1229,8 @@ impl Engine {
         let Some(c) = self.chats.get_mut(&chat) else { return };
         let Some(p) = c.peers.remove(tag) else { return };
         let group = c.group;
-        if let Some(r) = &p.rtc {
-            let _ = r.send(RtcCmd::Close);
+        if let Some(r) = p.rtc.clone() {
+            close_later(r);
         }
         if let Some(l) = p.local.and_then(|l| self.links.get_mut(&l)) {
             l.peer = None;
@@ -1258,7 +1284,7 @@ impl Engine {
         }
         c.peers.clear();
         for r in rtcs {
-            let _ = r.send(RtcCmd::Close);
+            close_later(r);
         }
         for s in signals {
             self.rdv.remove(s);
