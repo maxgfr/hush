@@ -1,17 +1,35 @@
-import type { JSX } from "preact";
+import type { ComponentType, JSX } from "preact";
+import { useEffect, useState } from "preact/hooks";
 import { bootError, ready, view } from "../app/state";
 import { Logo } from "./components/Icons";
 import { t } from "./i18n";
 import { applyUpdate, updateReady } from "./pwa";
 import { ChatScreen } from "./screens/ChatScreen";
-import { ContactsScreen } from "./screens/ContactsScreen";
 import { Ended } from "./screens/Ended";
 import { Home } from "./screens/Home";
-import { IdentityScreen } from "./screens/IdentityScreen";
 import { Join } from "./screens/Join";
 import { NewConversation } from "./screens/NewConversation";
 import { Passphrase } from "./screens/Passphrase";
-import { SettingsScreen } from "./screens/SettingsScreen";
+
+/** Screens off the main path (contacts, identity, settings) load on first use. */
+function lazy(load: () => Promise<ComponentType>): () => JSX.Element {
+  let loaded: ComponentType | null = null;
+  return function Lazy(): JSX.Element {
+    const [C, setC] = useState<ComponentType | null>(() => loaded);
+    useEffect(() => {
+      if (!C)
+        void load().then((c) => {
+          loaded = c;
+          setC(() => c);
+        });
+    }, [C]);
+    return C ? <C /> : <main class="page center" aria-busy="true" />;
+  };
+}
+
+const ContactsScreen = lazy(() => import("./screens/ContactsScreen").then((m) => m.ContactsScreen));
+const IdentityScreen = lazy(() => import("./screens/IdentityScreen").then((m) => m.IdentityScreen));
+const SettingsScreen = lazy(() => import("./screens/SettingsScreen").then((m) => m.SettingsScreen));
 
 function Screen(): JSX.Element {
   const v = view.value;
