@@ -44,7 +44,9 @@ struct IdentityView: View {
                     Button {
                         busy = true
                         Task {
-                            try? await store.ensureIdentity()
+                            // The identifier arrives through the store's events; a failure leaves the
+                            // button as it was.
+                            _ = try? await store.ensureIdentity()
                             busy = false
                         }
                     } label: {
