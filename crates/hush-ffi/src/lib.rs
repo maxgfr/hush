@@ -1,9 +1,11 @@
-//! UniFFI bindings of `hush-core`, for the Android (Kotlin) and iOS (Swift) apps to come.
+//! UniFFI bindings for the Android (Kotlin) and iOS (Swift) apps.
 //!
-//! The mobile apps will carry the exact same bytes as the web app and the CLI, over Bluetooth LE
-//! or Wi-Fi instead of WebRTC: link handshake messages and session frames are transport-agnostic,
-//! and `StreamDecoder` / `Fragmenter` / `Reassembler` frame them for byte streams (TCP, L2CAP)
-//! and small packets (GATT). Generate the bindings with:
+//! - `HushApp` (in `app.rs`) is the whole engine of `hush-app`: conversations, contacts, the
+//!   vault, every network transport, and the Bluetooth and Wi-Fi links the app's radios open.
+//! - The sans-IO pieces of `hush-core` stay exported below (links, handshakes, sessions,
+//!   framing), for tests and tools.
+//!
+//! Generate the bindings with:
 //!
 //! ```sh
 //! cargo build -p hush-ffi --profile ffi
@@ -11,6 +13,9 @@
 //!   --library target/ffi/libhush_ffi.dylib --language kotlin --out-dir bindings/kotlin
 //! ```
 #![forbid(unsafe_code)]
+
+mod app;
+pub use app::*;
 
 use std::sync::{Arc, Mutex};
 
@@ -32,6 +37,9 @@ fn rng() -> UnwrapErr<SysRng> {
 pub enum HushError {
     #[error("{name}")]
     Core { name: String },
+    /// From the engine: a message to show, or a core error name ("Decrypt" for a wrong passphrase).
+    #[error("{message}")]
+    App { message: String },
 }
 
 impl From<hush_core::Error> for HushError {
