@@ -23,7 +23,8 @@ Report vulnerabilities privately through [GitHub security advisories](https://gi
    - The joiner's first message proves it holds the link (and passphrase).
    - The creator encapsulates to the joiner's fresh X-Wing key.
    - The WebRTC offer and answer (which carry IP addresses) only travel in messages 2 and 3, encrypted under the post-quantum handshake key.
-   - Each side commits to a random nonce before seeing the other's, so the 5-emoji code (30 bits) cannot be ground by an attacker in the middle.
+   - Each side commits to a random nonce before seeing the other's, and the code only covers what was fixed before either nonce was revealed. An attacker in the middle therefore cannot grind the 5-emoji code (30 bits): it gets one try.
+   - Every first message gets its own key (Noise's `psk` rule), even when many people open the same link.
 4. **The session.**
    - **Per message:** each direction and lane has a KDF chain. Every message key is used once and forgotten, which gives forward secrecy.
    - **Every 5 minutes or 1000 messages:** a fresh X-Wing exchange moves the session to a new root and erases the old one. This is post-compromise security against quantum adversaries too.
@@ -62,9 +63,17 @@ Saved contacts were verified when they were saved, and reconnect with a mutually
 - **The code you run comes from GitHub Pages.** Whoever controls the GitHub account, the CI or a dependency could serve a modified app.
   - Mitigations: the service worker only updates when you accept, the site is built by public CI from this repository, and the CLI is an independent client of the same protocol.
   - For the highest stakes, use the CLI or a self-hosted copy.
-- **Shared origin.** Every `maxgfr.github.io/*` project shares one web origin, so another page there could read hush's IndexedDB. That is why the vault is always encrypted by your passphrase, which never leaves memory. A dedicated domain would remove this.
+- **Shared origin.** Every `maxgfr.github.io/*` project shares one web origin, so a page there (one of these sites, if it were compromised) is not kept out the way another site would be.
+  - **Protected:**
+    - the vault is always encrypted by your passphrase, which never leaves memory;
+    - the offline copy of the app is checked file by file against hashes built into the service worker, so a rewritten cache is never served;
+    - only hush's own pages can switch it to a new version.
+  - **Not protected:**
+    - such a page, if you visit it, can script a hush tab it opens;
+    - it can change hush's plain-text preferences (relays, TURN server, display name), which never hold secrets.
+  - A dedicated domain would remove both.
 - **Endpoints.** Malware, a malicious browser extension, or someone holding your unlocked phone sees what you see.
-  - JavaScript strings and the browser's memory cannot be wiped reliably. "End" reloads the page to drop them.
+  - JavaScript strings and the browser's memory cannot be wiped reliably. "End" erases the session keys at once. Leaving the end screen reloads the page to drop the rest, except while the vault is unlocked (to keep contacts reachable): lock it, or close the tab.
 - **A link intercepted before it is opened.**
   - If an attacker opens a one-to-one link first, they become the peer. The real recipient sees "link already used", and the emojis will not match if the attacker relays.
   - Send links through a channel you trust, keep the expiry short, add a passphrase given another way, and always compare the emojis.
@@ -74,8 +83,13 @@ Saved contacts were verified when they were saved, and reconnect with a mutually
   - Use TURN-only mode, a VPN or Tor at the system level if that matters.
 - **Passphrases** are only as strong as their entropy, slowed by Argon2id. Someone holding a protected link can try passphrases offline against a captured first message. Use long, random passphrases.
 - **Both apps must be open.** There is no server and no push, so a message cannot reach a closed app.
-- **Group messages** are encrypted pairwise. A member who leaves keeps what they already received.
-- **The libraries.** The `ml-kem`, `ml-dsa` and `x-wing` crates are pure Rust (RustCrypto) and have not been independently audited. Constant-time behavior is not guaranteed under a JavaScript engine's JIT.
+- **Group messages** are encrypted pairwise. A member who leaves keeps what they already received. Names are made unique within a group and renames are announced, but a name is still chosen by its owner: compare the emojis with each member.
+- **Contacts.**
+  - Contacts are saved only after both people compared the emojis. They reconnect with keys only they hold.
+  - The first message of a reconnection carries no secret, but it has no forward secrecy: prekeys are derived from the identity seed.
+  - People who connected by identifier are authenticated by that identifier, not by emojis.
+- **The libraries.** The `ml-kem`, `ml-dsa` and `x-wing` crates are pure Rust (RustCrypto) and have not been independently audited. The versions used include every published fix. Constant-time behavior is not guaranteed under a JavaScript engine's JIT.
+- **This code has been reviewed by its authors, not independently.** See [docs/AUDIT.md](docs/AUDIT.md) for what was checked, against which literature, and what was fixed.
 
 ## Browser hardening
 
@@ -83,5 +97,7 @@ Saved contacts were verified when they were saved, and reconnect with a mutually
 - Trusted Types.
 - No third-party resource.
 - The app refuses to run inside a frame.
+- Received files that are not previewable images are handed over as opaque downloads, never rendered.
+- Test overrides in the address (`?relay=`) only work on `localhost`.
 - No referrer is sent.
 - The link fragment is removed from the address bar as soon as it is read.

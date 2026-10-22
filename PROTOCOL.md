@@ -1,4 +1,6 @@
-# hush protocol, version 1
+# hush protocol
+
+Links are at version 2. Version 2 changed the link handshake (§3) after the [October 2026 audit](docs/AUDIT.md), and version 1 links are refused. Every other format is unchanged since version 1.
 
 Everything here is implemented once, in `crates/hush-core`. The web app (through WebAssembly), the CLI and the mobile bindings call the same code. This document is the reference for anyone writing another client.
 
@@ -8,14 +10,14 @@ There is a single cipher suite and nothing is negotiated, so nothing can be down
 - `Extract(salt, ikm)` and `Expand(prk, info, L)` are HKDF-SHA-256 (RFC 5869).
 - `AEAD` = ChaCha20-Poly1305 (RFC 8439). `XAEAD` = XChaCha20-Poly1305.
 - `KEM` = X-Wing (X25519 + ML-KEM-768, draft-connolly-cfrg-xwing-kem). Encapsulation key 1216 bytes, ciphertext 1120 bytes, shared secret 32 bytes. Non-contributory X25519 results are rejected.
-- Every label is an ASCII string starting with `hush/v1/`.
+- Every label is an ASCII string starting with `hush/v1/`, except the link handshake's protocol name (`hush/v2/…`).
 - Integers are big-endian.
 - `b64u` is unpadded base64url with canonical trailing bits.
 
 ## 1. Links
 
 ```
-https://maxgfr.github.io/hush/#1.<mode>.<b64u(L)>.<expiry>[.p]
+https://maxgfr.github.io/hush/#2.<mode>.<b64u(L)>.<expiry>[.p]
 mode    s (one-to-one) | g (group)
 L       32 random bytes
 expiry  minutes since the Unix epoch, base 36, no leading zero
@@ -41,7 +43,7 @@ envelope = 0x01 || nonce(24) || XAEAD(env_key, nonce, aad = "hush/v1/env" || 0x0
 inner    = ts_ms(u64) || from(16) || to(16, all zero = everyone) || kind(1) || body
 ```
 
-- **Validity:** an envelope is accepted once (its nonce is remembered) and only within ±120 s of `ts_ms`, or ±600 s when it was carried by hand as a code.
+- **Validity:** an envelope is accepted once and only within ±120 s of `ts_ms`, or ±600 s when it was carried by hand as a code. Its nonce is remembered until `ts_ms + 600 s`. When too many fresh nonces are pending, new envelopes are refused rather than old nonces forgotten.
 - **Tags:** `from` and `to` are random tags, one per app session. They never identify a person.
 - **Kinds:**
 
@@ -68,7 +70,7 @@ inner    = ts_ms(u64) || from(16) || to(16, all zero = everyone) || kind(1) || b
 This is a Noise-style symmetric state (§5.2 of the Noise spec): `h`, `ck`, `k`, `n`.
 - **MixKey:** `MixKey(ikm)` sets `ck, k = Expand(Extract(ck, ikm), "hush/v1/noise/mix", 64)`.
 - **Encrypt:** `EncryptAndHash` uses `AEAD(k, nonce = 0^4 || u64(n), aad = h)`.
-- **Protocol name:** `hush/v1/link:NNpsk0+XWing+SHA256+ChaChaPoly`.
+- **Protocol name:** `hush/v2/link:NNpsk0+XWing+SHA256+ChaChaPoly`.
 
 J opens the link; C is a member (the creator, or in a group any member).
 
@@ -76,14 +78,18 @@ J opens the link; C is a member (the creator, or in a group any member).
 h = ck = H(protocol name)
 MixHash("hush/v1/link/prologue" || mode || room_id || u64(expiry)); MixKey(psk)
 
-HS1  J → C   e (X-Wing ek)           MixHash(e)
+HS1  J → C   e (X-Wing ek)           MixHash(e); MixKey(e)
              EncryptAndHash(H("hush/v1/sas-commit" || N_J) || payload1)
 HS2  C → J   ct = Encap(e)           MixHash(ct); MixKey(ss)
-             EncryptAndHash(N_C || payload2)
+             EncryptAndHash(N_C || payload2)        h2 = h after this message
 HS3  J → C   EncryptAndHash(N_J || payload3)        C checks the commitment to N_J
 root = Expand(ck, "hush/v1/noise/split" || h, 32)
-SAS  = 5 × 6 bits of Expand(Extract("hush/v1/sas", h), "hush/v1/sas/emoji" || N_C || N_J, 4)   (Matrix's 64 emojis)
+SAS  = 5 × 6 bits of Expand(Extract("hush/v1/sas", h2), "hush/v1/sas/emoji" || N_C || N_J, 4)   (Matrix's 64 emojis)
 ```
+
+Two rules make this safe:
+- **`MixKey(e)`.** This is Noise's rule for `psk` handshakes: it gives every HS1 its own key. Without it, every HS1 of a link would be encrypted under one key and nonce.
+- **The SAS covers the transcript up to HS2 only.** Each side's nonce is fixed before the other side's is known, and nothing sent after a reveal changes the emojis. Someone in the middle therefore gets one try, which succeeds with probability 2^-30.
 
 The payloads are UTF-8 JSON:
 - HS1: `{"v":1,"name":…}`

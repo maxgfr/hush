@@ -46,9 +46,9 @@ That is much stronger than RSA, which a quantum computer breaks outright. It sti
 ```bash
 brew install maxgfr/tap/hush
 hush chat                                   # prints a link (and a QR code), then chat in the terminal
-hush chat 'https://maxgfr.github.io/hush/#1.s.…'
+hush chat 'https://maxgfr.github.io/hush/#2.s.…'
 hush send report.pdf photos.zip             # prints a link; exits once the files are delivered
-hush receive 'https://maxgfr.github.io/hush/#1.s.…' --out ~/Downloads
+hush receive 'https://maxgfr.github.io/hush/#2.s.…' --out ~/Downloads
 hush backup inspect hush-backup.hush        # read a backup made by the web app
 hush new --group --expires 1440             # just print a link
 ```
