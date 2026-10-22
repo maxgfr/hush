@@ -43,6 +43,7 @@ An internal review of hush: protocol, Rust core, web app and CLI. Each part was 
 | L7 | Low | Duplicates were detected on a prefix, so a relay could get a genuine envelope dropped | Fixed |
 | L8 | Low | CLI downloads could follow a planted symlink or use a Windows device name | Fixed |
 | L9 | Low | Any page of the origin could make the service worker activate an update | Fixed |
+| F7 | Low | The web app keyed the contact handshake with the raw contact secret instead of the key derived from it (`PROTOCOL.md` §6) | Fixed |
 
 ### F1: the emojis could be ground (critical)
 
@@ -123,6 +124,7 @@ The end-to-end test `sw.spec.ts` poisons the cache and checks that the genuine a
 - **L7.** Envelopes are deduplicated on a hash of the whole envelope, in the web app and the CLI.
 - **L8.** The CLI creates downloads with `create_new` and never opens an existing path, which also rules out a planted symlink. Windows device names and trailing dots or spaces are neutralized.
 - **L9.** The service worker only takes `skip-waiting` from pages in its own scope.
+- **F7.** The same contact secret was used directly as the handshake's pre-shared key and as the input that derives the rendezvous keys, against the protocol's own key separation. It was found when the Rust engine (which follows the specification) could not reconnect with a browser. The web app now derives the key as specified; its end-to-end tests run against the Rust engine.
 
 ## Checked and sound
 

@@ -29,5 +29,5 @@ sha2 = "0.10"
 zeroize = "=1.9.1"
 
 [dev-dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "test-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "test-util", "io-std"] }
 tempfile = "3"

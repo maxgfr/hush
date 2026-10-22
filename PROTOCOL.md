@@ -205,11 +205,52 @@ snapshot     = {"v":1, "identity": {"seed": b64u, "name"} | null, "contacts": [{
 
 Argon2id costs are read from the header. Costs above 1 GiB, 16 passes or 8 lanes are refused.
 
-## 8. Local links (mobile)
+## 8. Nearby links (mobile)
+
+The phone apps also find each other over Bluetooth LE and Wi-Fi, with no network at all. A nearby link carries exactly what the relays and WebRTC carry: it adds reach, never trust.
+
+**Discovery tokens.** Every channel (a link, a saved contact) has a 16-byte token for each 10-minute slot:
+
+```
+token(slot) = HMAC(env_key, "hush/v2/local/adv" || u64(slot))[..16]      slot = floor(unix_ms / 600000)
+```
+
+Tokens derive from the envelope key, not the topic, so a relay cannot recognize a token it hears nearby. Scanners also accept the previous slot's token.
+
+**Who advertises, who scans.** This avoids two devices dialing each other at once:
+
+| Channel | Advertises | Scans |
+|---|---|---|
+| A link | Its creator (and the members of an open group) | Whoever opened it, until connected |
+| A saved contact, not connected | The side with the larger identifier hash | The side with the smaller one, which also starts the contact handshake |
+
+**Bluetooth LE.**
+- The advertiser adds a GATT service whose UUID is the token, as a big-endian 128-bit UUID, and advertises that UUID.
+- The service has three characteristics:
+
+| Characteristic | UUID | Use |
+|---|---|---|
+| PSM | `e261fba8-836b-459c-84cc-e15cd0d124b4` | Read: the L2CAP PSM to connect to, `u16` big-endian |
+| RX | `cb5f7ab3-a841-4a1b-9f80-5855197fd921` | Write without response: packets from the scanner |
+| TX | `66c5f983-f8d0-406d-afb7-3cd1b35e1712` | Notify: packets to the scanner |
+
+- The scanner connects and reads PSM. It then opens an L2CAP connection-oriented channel, which is a byte stream.
+- When L2CAP is unavailable, the scanner falls back to RX/TX packets of at most `ATT MTU − 3` bytes.
+
+**Wi-Fi.** A DNS-SD service `_hush._tcp`, whose instance name is the lowercase hex of the token, offers a TCP byte stream. It works:
+- on a local network (Bonjour, Android NSD);
+- between iPhones with no network (Apple peer-to-peer Wi-Fi);
+- between Android phones with no network (Wi-Fi Direct service discovery, the group owner listening on the `port` given in a TXT record).
+
+**Framing.**
 
 | Link | Wire format |
 |---|---|
-| Byte streams (TCP over Wi-Fi, BLE L2CAP) | Each record is `lane(1) ‖ u32(len) ‖ frame`. |
+| Byte streams (TCP over Wi-Fi, BLE L2CAP) | Each record is `lane(1) ‖ u32(len) ‖ data`. |
 | Small packets (BLE GATT) | A record is split into packets of `flags(1: first = 1, last = 2) ‖ u16(seq) ‖ bytes`. A lost or reordered packet drops the partial record. |
 
-Lane 255 carries sealed envelopes, so the handshake travels over the same link.
+**Lanes.**
+- Lane 255 carries signaling: `topic(32) ‖ envelope`, the envelopes of §2, exactly as a relay would carry them. Handshakes run on it, and a peer whose handshake came over the link (or was heard on it) gets its session frames on the same link.
+- Lanes 0 to 3 carry that peer's session frames (§4). When a handshake runs over a nearby link, the hello payloads carry no `sdp`: no WebRTC is set up.
+
+**Limits.** Each device keeps at most 8 nearby links. A link that sends more than 32 records that fail to open is closed.

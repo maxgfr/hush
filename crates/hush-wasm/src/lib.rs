@@ -466,7 +466,8 @@ impl Identity {
     }
 
     /// Starts a contact handshake (`C1`) to a peer whose bundle we hold: `{ state, c1 }`.
-    /// `psk` is the contact secret, or empty for a first request (the lookup key is used).
+    /// `psk` is the contact secret (the handshake key is derived from it), or empty for a first
+    /// request (the lookup key is used).
     #[wasm_bindgen(js_name = contactStart)]
     pub fn contact_start(&self, psk: &[u8], peer_bundle: &[u8], payload: &[u8]) -> Result<Object, JsError> {
         let peer = bundle::Bundle::parse_stored(peer_bundle).map_err(err)?;
@@ -504,11 +505,14 @@ impl Identity {
 }
 
 /// The contact secret if known, else the lookup key of the responder's identifier.
-fn contact_psk(psk: &[u8], responder: &[u8; 32]) -> Result<[u8; 32], JsError> {
-    if psk.is_empty() {
+/// The handshake key: from the contact secret (`PROTOCOL.md` §6: `Expand(croot, "…/contact/psk")`,
+/// never the raw secret, which also derives the rendezvous), or the lookup key of the
+/// responder's identifier for a first request.
+fn contact_psk(secret: &[u8], responder: &[u8; 32]) -> Result<[u8; 32], JsError> {
+    if secret.is_empty() {
         Ok(lookup::LookupKeys::new(responder).psk())
     } else {
-        arr32(psk)
+        Ok(contact::ContactKeys::new(&arr32(secret)?).psk())
     }
 }
 
