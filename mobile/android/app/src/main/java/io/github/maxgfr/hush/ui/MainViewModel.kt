@@ -107,6 +107,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 engine.store.update { Reducer.forget(it, c.id) }
             }
         }
+        // Conversations that ended out of sight leave nothing behind either.
+        val gone = s.chats.values.filter { it.ended != null && (top !is Screen.Chat || it.id != top.id) }
+        if (gone.isNotEmpty()) engine.store.update { st -> gone.fold(st) { acc, c -> Reducer.forget(acc, c.id) } }
         val l = s.lookup
         if (l?.status == LookupStatus.REQUESTED && l.chat != null && top == Screen.Contacts) {
             engine.store.update { it.copy(lookup = null) }

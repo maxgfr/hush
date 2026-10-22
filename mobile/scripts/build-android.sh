@@ -16,7 +16,11 @@ cargo ndk "${targets[@]}" --platform 29 -o "$APP/jniLibs" build -p hush-ffi --pr
 
 # The bindings come from the host build of the same crate (UniFFI reads its metadata).
 cargo build -p hush-ffi --profile "$PROFILE" --locked
-LIB=$(ls "target/$PROFILE"/libhush_ffi.{so,dylib} 2>/dev/null | head -1)
+# Only one of the two exists, and `ls` fails on the other: pick whichever is there.
+LIB=""
+for f in "target/$PROFILE/libhush_ffi.so" "target/$PROFILE/libhush_ffi.dylib"; do
+  [ -f "$f" ] && LIB=$f && break
+done
 cargo run -p hush-ffi --features cli --bin uniffi-bindgen --locked -- \
   generate --library "$LIB" --language kotlin --out-dir "$APP/java" --no-format
 
