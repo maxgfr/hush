@@ -28,6 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.github.maxgfr.hush.R
@@ -108,7 +109,7 @@ private fun Tile(icon: Int, label: String, trailing: String? = null, onClick: ()
 @Composable
 private fun LiveChat(c: ChatState, onClick: () -> Unit) {
     val title = when {
-        c.group -> stringResource(R.string.members, c.present.size + 1)
+        c.group -> pluralStringResource(R.plurals.members, c.present.size + 1, c.present.size + 1)
         else -> c.present.firstOrNull()?.name?.ifBlank { null } ?: stringResource(R.string.them)
     }
     TextButton(onClick = onClick, modifier = Modifier.fillMaxWidth()) {

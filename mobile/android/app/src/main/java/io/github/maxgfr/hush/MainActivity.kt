@@ -22,7 +22,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.maxgfr.hush.core.LinkInput
@@ -72,12 +72,11 @@ private fun Root(vm: MainViewModel) {
     val state by vm.state.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
-    val context = LocalContext.current
-    val message = vm.message
+    val message = vm.message?.let { stringResource(it) }
     LaunchedEffect(message) {
         if (message != null) {
             vm.message = null
-            snackbar.showSnackbar(context.getString(message))
+            snackbar.showSnackbar(message)
         }
     }
     BackHandler(enabled = vm.stack.size > 1) { vm.back() }

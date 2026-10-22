@@ -55,6 +55,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
@@ -114,7 +115,7 @@ fun ChatScreen(vm: MainViewModel, state: UiState, settings: Settings, id: ULong)
     }
     val contactName = chat.contactKey?.let { key -> state.contacts.firstOrNull { it.key == key }?.name }
     val title = when {
-        chat.group -> stringResource(R.string.members, peers.size + 1)
+        chat.group -> pluralStringResource(R.plurals.members, peers.size + 1, peers.size + 1)
         !contactName.isNullOrBlank() -> contactName
         open -> peers[0].name.ifBlank { stringResource(R.string.them) }
         else -> stringResource(R.string.app_name)

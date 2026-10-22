@@ -19,15 +19,18 @@ object NearbyPermissions {
                 Manifest.permission.BLUETOOTH_CONNECT,
             )
         } else {
-            listOf(Manifest.permission.ACCESS_FINE_LOCATION)
+            LOCATION
         }
 
     fun wifiDirect(): List<String> =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             listOf(Manifest.permission.NEARBY_WIFI_DEVICES)
         } else {
-            listOf(Manifest.permission.ACCESS_FINE_LOCATION)
+            LOCATION
         }
+
+    // Android asks for both whenever the precise one is wanted.
+    private val LOCATION = listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
 
     /** Everything "Nearby" asks for at once, plus the notification of the foreground service. */
     fun all(): List<String> {

@@ -327,7 +327,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             busy = false
             val ctx = getApplication<Application>()
-            backupResult = if (n != null) ctx.getString(R.string.backup_done, n.toInt()) else ctx.getString(R.string.backup_bad)
+            backupResult = if (n != null) ctx.resources.getQuantityString(R.plurals.backup_done, n.toInt(), n.toInt()) else ctx.getString(R.string.backup_bad)
         }
     }
 

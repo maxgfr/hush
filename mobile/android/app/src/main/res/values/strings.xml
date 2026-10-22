@@ -39,7 +39,6 @@
     <string name="share_passphrase">Give the passphrase through another channel (voice, text message…).</string>
     <string name="waiting_peer">Waiting for the other person…</string>
     <string name="waiting_creator">Waiting for the person who made the link…</string>
-    <string name="waiting_pass_hint">If this lasts, check the passphrase.</string>
     <string name="connecting">Setting up the encrypted connection…</string>
 
     <string name="paste_link">Paste the link you received</string>
@@ -55,7 +54,6 @@
 
     <string name="them">The other person</string>
     <string name="someone">Someone</string>
-    <string name="you">You</string>
     <string name="path_direct">Direct</string>
     <string name="path_relay">Via relays</string>
     <string name="path_connecting">Connecting…</string>
@@ -87,7 +85,6 @@
     <string name="timer_off">Off</string>
     <string name="timer_off_short">off</string>
     <string name="invite">Invite</string>
-    <string name="members">%1$d people</string>
     <string name="lock">Lock the room</string>
     <string name="unlock">Unlock the room</string>
     <string name="locked">Room locked: nobody else can join.</string>
@@ -113,7 +110,6 @@
     <string name="start_over">New conversation</string>
 
     <string name="save_contact">Save contact</string>
-    <string name="save_contact_hint">To reconnect later without a new link. The other person must accept too. Contacts are encrypted with your passphrase.</string>
     <string name="contact_saved">%1$s is in your contacts.</string>
     <string name="contact_asked">%1$s wants to save you as a contact.</string>
     <string name="contact_waiting">Request sent, waiting for %1$s.</string>
@@ -156,7 +152,6 @@
     <string name="decline">Decline</string>
     <string name="wants_to_connect">%1$s (%2$s) wants to contact you.</string>
 
-    <string name="id_title">Your identifier</string>
     <string name="id_intro">No sign-up: this identifier is computed on your device from your public keys (Ed25519 + ML-DSA-65). Nobody can impersonate it.</string>
     <string name="id_create">Create my identifier</string>
     <string name="reachable">Reachable by my identifier</string>
@@ -169,7 +164,6 @@
     <string name="backup_export">Export a backup</string>
     <string name="backup_import">Import a backup</string>
     <string name="backup_password">Backup passphrase</string>
-    <string name="backup_done">Backup imported: %1$d contacts.</string>
     <string name="backup_bad">Wrong passphrase or modified file.</string>
     <string name="backup_saved">Backup saved.</string>
 
@@ -197,4 +191,12 @@
     <string name="notif_text">Keeping your conversations reachable.</string>
     <string name="error_generic">Something went wrong. Try again.</string>
     <string name="qr_label">QR code</string>
+    <plurals name="members">
+        <item quantity="one">%1$d person</item>
+        <item quantity="other">%1$d people</item>
+    </plurals>
+    <plurals name="backup_done">
+        <item quantity="one">Backup imported: %1$d contact.</item>
+        <item quantity="other">Backup imported: %1$d contacts.</item>
+    </plurals>
 </resources>
