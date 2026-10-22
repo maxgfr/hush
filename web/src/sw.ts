@@ -10,7 +10,9 @@
  * cached files. This worker's own script lives in its registration, out of
  * their reach, and it only serves a cached file whose SHA-256 matches the hash
  * built into it. Anything else is never served: the cache is dropped and the
- * file comes from the network.
+ * file comes from the network. Only the body is taken from the cache: status
+ * and headers are set here, since another page could have stored a redirect
+ * (which would carry the #link fragment away) around genuine bytes.
  */
 
 // A module: these interfaces stay local rather than merge with the DOM's.
@@ -43,6 +45,21 @@ const PRECACHE = __PRECACHE__;
 const INTEGRITY = new Map(
   Object.entries(__INTEGRITY__).map(([path, hash]) => [new URL(path, sw.location.href).href, hash]),
 );
+/** The type of each file the build emits, by extension; nothing else comes from the cache. */
+const TYPES: Record<string, string> = {
+  html: "text/html; charset=utf-8",
+  js: "text/javascript; charset=utf-8",
+  css: "text/css; charset=utf-8",
+  wasm: "application/wasm",
+  webmanifest: "application/manifest+json",
+  json: "application/json",
+  svg: "image/svg+xml",
+  png: "image/png",
+};
+const typeOf = (url: string): string => {
+  if (url.endsWith("/")) return "text/html; charset=utf-8";
+  return TYPES[new URL(url).pathname.split(".").pop() ?? ""] ?? "application/octet-stream";
+};
 /** What an older version left behind. */
 const stale = (key: string) => key.startsWith("hush-") && key !== CACHE;
 
@@ -63,11 +80,7 @@ async function verified(cache: Cache, url: string): Promise<Response | null> {
     await caches.delete(CACHE);
     return null;
   }
-  return new Response(body, {
-    status: hit.status,
-    statusText: hit.statusText,
-    headers: hit.headers,
-  });
+  return new Response(body, { status: 200, headers: { "Content-Type": typeOf(url) } });
 }
 
 sw.addEventListener("install", (e) => {
