@@ -580,6 +580,13 @@ pub struct HushApp {
 
 impl HushApp {
     fn ask<T: Send + 'static>(&self, make: impl FnOnce(hush_app::engine::Reply<T>) -> Cmd) -> Res<T> {
+        // From inside a callback (a runtime thread), waiting would panic, and a panic aborts the
+        // whole app (panic = "abort"): say so instead.
+        if tokio::runtime::Handle::try_current().is_ok() {
+            return Err(HushError::App {
+                reason: "called from a hush callback: call it from another thread".into(),
+            });
+        }
         self.rt.block_on(self.app.ask(make)).map_err(app_err)
     }
 }
