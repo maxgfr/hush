@@ -27,7 +27,7 @@
 | Encrypted backups | One file with your identifier, contacts and any history you chose to keep. The CLI reads the same format. |
 | Offline | Swap the handshake as QR codes on a shared Wi-Fi or hotspot, with no Internet at all. |
 
-The cryptography (key exchange, signatures, ratchet, envelopes, vault, backups) is a single Rust crate. It is compiled to WebAssembly for the web app, used natively by the CLI, and exposed to Kotlin and Swift for the mobile apps to come. See [PROTOCOL.md](PROTOCOL.md) for every byte and [SECURITY.md](SECURITY.md) for what is protected and what is not.
+The cryptography (key exchange, signatures, ratchet, envelopes, vault, backups) is a single Rust crate. It is compiled to WebAssembly for the web app. Natively, it powers the engine shared by the CLI and the Android and iOS apps, which also talk over Bluetooth and Wi-Fi with no network at all. See [PROTOCOL.md](PROTOCOL.md) for every byte and [SECURITY.md](SECURITY.md) for what is protected and what is not.
 
 ## Cryptography
 
@@ -66,6 +66,10 @@ Useful flags:
 - `--relay-only --turn URL` to hide your IP address.
 - `--offline` to swap QR codes with no network.
 
+## Phones
+
+The Android and iOS apps open the same links, groups, contacts and backups as the web app. Nearby, they also find each other over Bluetooth LE or Wi-Fi, with no network at all. See [docs/MOBILE.md](docs/MOBILE.md) for how they work, how to build and install them, and the two-phone test checklist.
+
 ## Development
 
 ```bash
@@ -80,14 +84,17 @@ bun install
 bun run wasm           # builds the Rust core to src/core/pkg
 bun run dev            # http://localhost:5173 with a local relay and tracker
 bun run test           # unit tests
-bun run test:e2e       # Playwright: browsers, phones, CLI interop (cargo build -p hush-cli first)
+bun run test:e2e       # Playwright: browsers, phones, CLI and engine interop
+                       # (first: cargo build -p hush-cli && cargo build -p hush-app --example peer)
 ```
 
 ```
 crates/hush-core    the protocol: X-Wing, ML-DSA, handshakes, ratchet, envelopes, vault, backups, framing
 crates/hush-wasm    WebAssembly bindings for the web app
+crates/hush-app     the engine shared by the CLI and the phones: conversations, contacts, vault, every transport
 crates/hush-cli     the `hush` command
-crates/hush-ffi     UniFFI bindings (Kotlin, Swift) for the mobile apps: see docs/MOBILE.md
+crates/hush-ffi     UniFFI bindings (Kotlin, Swift) of the engine for the phones: see docs/MOBILE.md
+mobile/             the Android (Compose) and iOS (SwiftUI) apps and their build scripts
 web/                the web app: signaling, WebRTC, UI, service worker
 ```
 

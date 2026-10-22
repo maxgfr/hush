@@ -91,6 +91,12 @@ Saved contacts were verified when they were saved, and reconnect with a mutually
 - **The libraries.** The `ml-kem`, `ml-dsa` and `x-wing` crates are pure Rust (RustCrypto) and have not been independently audited. The versions used include every published fix. Constant-time behavior is not guaranteed under a JavaScript engine's JIT.
 - **This code has been reviewed by its authors, not independently.** See [docs/AUDIT.md](docs/AUDIT.md) for what was checked, against which literature, and what was fixed.
 
+## Phones
+
+The Android and iOS apps run the same engine as the CLI, natively (no JavaScript). Over Bluetooth and Wi-Fi they carry the same sealed envelopes and frames as the relays: a nearby link adds reach, not trust. See [docs/MOBILE.md](docs/MOBILE.md) for what stays on the phone, and what a nearby link reveals:
+- a rotating token while advertising;
+- a `_hush._tcp` service on a shared Wi-Fi network.
+
 ## Browser hardening
 
 - A strict Content-Security-Policy: no inline script, `connect-src 'self' wss:`.
