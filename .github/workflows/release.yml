@@ -140,7 +140,8 @@ jobs:
           HUSH_ANDROID_KEYSTORE="$RUNNER_TEMP/hush.p12" ./gradlew --no-daemon assembleRelease
           rm -f "$RUNNER_TEMP/hush.p12"
           cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/hush-android.apk"
-          "$ANDROID_SDK_ROOT"/build-tools/*/apksigner verify --print-certs "$GITHUB_WORKSPACE/hush-android.apk" | head -3
+          APKSIGNER=$(find "$ANDROID_SDK_ROOT/build-tools" -name apksigner | sort | tail -1)
+          "$APKSIGNER" verify --print-certs "$GITHUB_WORKSPACE/hush-android.apk" | head -3
       - if: env.KEYSTORE != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

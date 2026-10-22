@@ -191,6 +191,18 @@ jobs:
       - name: Build, unit tests, lint
         working-directory: mobile/android
         run: ./gradlew --no-daemon assembleDebug assembleRelease assembleDebugAndroidTest testDebugUnitTest lintDebug
+      # A build anyone can install to try the change: "hush debug" (io.github.maxgfr.hush.debug),
+      # signed with the runner's debug key, so it sits next to the release app on a phone.
+      - name: App to download
+        run: |
+          cp mobile/android/app/build/outputs/apk/debug/app-debug.apk hush-android-debug.apk
+          echo "**Android:** download the \`hush-android-debug\` artifact below, unzip it and open \`hush-android-debug.apk\` on the phone or drag it onto an emulator." >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hush-android-debug
+          path: hush-android-debug.apk
+          if-no-files-found: error
+          retention-days: 30
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -208,10 +220,8 @@ jobs:
       - if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: android
-          path: |
-            mobile/android/app/build/outputs/apk/debug/*.apk
-            mobile/android/app/build/reports/
+          name: android-reports
+          path: mobile/android/app/build/reports/
           retention-days: 14
 
   ios:
@@ -243,9 +253,37 @@ jobs:
           xcodebuild -project Hush.xcodeproj -scheme Hush -destination "id=$DEVICE" \
             CODE_SIGNING_ALLOWED=NO test > build.log 2>&1 || { grep -E "error:" build.log | head -50; tail -100 build.log; exit 1; }
           grep -E "Test Suite .* (passed|failed)|Executed|\*\* TEST" build.log | tail -20
+      # Builds anyone can try without an Apple account: the simulator app (Apple silicon Macs), and
+      # the device app unsigned, for a sideloading tool to sign with the tester's own account.
+      - name: Apps to download
+        working-directory: mobile/ios
+        run: |
+          for sdk in iphonesimulator iphoneos; do
+            xcodebuild -project Hush.xcodeproj -scheme Hush -configuration Release -sdk "$sdk" \
+              -derivedDataPath "build/$sdk" ARCHS=arm64 CODE_SIGNING_ALLOWED=NO build > "build/$sdk.log" 2>&1 \
+              || { grep -E "error:" "build/$sdk.log" | head -50; tail -50 "build/$sdk.log"; exit 1; }
+          done
+          mkdir -p "$RUNNER_TEMP/apps/Payload"
+          ditto -c -k --keepParent build/iphonesimulator/Build/Products/Release-iphonesimulator/Hush.app \
+            "$GITHUB_WORKSPACE/hush-ios-simulator.zip"
+          cp -R build/iphoneos/Build/Products/Release-iphoneos/Hush.app "$RUNNER_TEMP/apps/Payload/"
+          (cd "$RUNNER_TEMP/apps" && zip -qry "$GITHUB_WORKSPACE/hush-ios-unsigned.ipa" Payload)
+          {
+            echo "**iOS:** download the \`hush-ios\` artifact below."
+            echo "- Simulator: unzip \`hush-ios-simulator.zip\` and drag \`Hush.app\` onto a booted simulator, or \`xcrun simctl install booted Hush.app\`."
+            echo "- iPhone: \`hush-ios-unsigned.ipa\` has to be signed with your Apple account first (Sideloadly, AltStore, or Xcode)."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hush-ios
+          path: |
+            hush-ios-simulator.zip
+            hush-ios-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
       - if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ios
+          name: ios-logs
           path: mobile/ios/build.log
           retention-days: 14

@@ -72,9 +72,17 @@ The CI workflow runs both, alongside the web, Rust and CLI jobs, and builds and 
 - **Android:** unit tests, lint, and instrumented tests on an emulator.
 - **iOS:** `swift test` for HushKit on macOS, and unit and UI tests on a simulator.
 
-It publishes the debug APK as an artifact. A release only goes out once every job is green, and it carries the signed Android app (`hush-android.apk`) next to the CLI binaries.
+Every run, on a pull request as on `main`, publishes the apps as artifacts at the bottom of its page (Actions → the run → Artifacts), kept 30 days:
+- `hush-android-debug`: `hush-android-debug.apk`, the debug build. It is called "hush debug" and has its own id (`io.github.maxgfr.hush.debug`), so it installs next to the release app.
+- `hush-ios`:
+  - `hush-ios-simulator.zip`, for a simulator on an Apple silicon Mac (`xcrun simctl install booted Hush.app`);
+  - `hush-ios-unsigned.ipa`, the iPhone build, unsigned: a sideloading tool (Sideloadly, AltStore) signs it with your Apple account before installing.
 
-**Install**
+`gh run download <run id> -n hush-android-debug` fetches one from the terminal.
+
+A release only goes out once every job is green, and it carries the signed Android app (`hush-android.apk`) next to the CLI binaries.
+
+**Install a release**
 - **Android:** download `hush-android.apk` from the [latest release](https://github.com/maxgfr/hush/releases/latest) and open it on the phone (allow installing from your browser). Check it against `SHA256SUMS`. Later releases install over it, since they are signed with the same key, which CI holds as the `ANDROID_KEYSTORE` secrets.
 - **iPhone:**
   1. Run `mobile/scripts/build-ios.sh`.

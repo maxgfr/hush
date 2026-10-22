@@ -42,6 +42,11 @@ android {
     }
 
     buildTypes {
+        // The test build CI publishes on every run: its own id, so it installs next to the release.
+        debug {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
         release {
             if (keystore != null) signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
