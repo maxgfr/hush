@@ -254,6 +254,16 @@ impl Channel {
         }
     }
 
+    /// A channel anyone can seal on (its key derives from public data, like an identifier's):
+    /// a flood of envelopes cannot shut it, at the cost of replays once it is full.
+    pub fn public(key: [u8; 32], topic: impl Fn(u32) -> [u8; 32] + Send + 'static) -> Self {
+        Self {
+            key,
+            topic: Box::new(topic),
+            guard: ReplayGuard::lossy(16_384),
+        }
+    }
+
     /// The token nearby devices advertise for this channel during a 10-minute slot. It derives
     /// from the envelope key, not the topic, so a relay that sees the topic cannot recognize it.
     pub fn token(&self, slot: u64) -> [u8; 16] {

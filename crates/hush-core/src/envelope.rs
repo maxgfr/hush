@@ -110,6 +110,7 @@ pub struct ReplayGuard {
     seen: HashSet<[u8; 24]>,
     by_expiry: BTreeSet<(u64, [u8; 24])>,
     capacity: usize,
+    lossy: bool,
 }
 
 impl Default for ReplayGuard {
@@ -125,6 +126,18 @@ impl ReplayGuard {
             seen: HashSet::new(),
             by_expiry: BTreeSet::new(),
             capacity,
+            lossy: false,
+        }
+    }
+
+    /// For a channel whose key is public (anyone can seal on it): full, it forgets the oldest
+    /// envelope rather than refusing new ones, so a flood cannot shut the channel. What travels
+    /// there must then be safe to receive twice.
+    #[must_use]
+    pub fn lossy(capacity: usize) -> Self {
+        Self {
+            lossy: true,
+            ..Self::new(capacity)
         }
     }
 
@@ -152,7 +165,12 @@ impl ReplayGuard {
             return Err(Error::Replay);
         }
         if self.seen.len() >= self.capacity {
-            return Err(Error::TooFarAhead);
+            if !self.lossy {
+                return Err(Error::TooFarAhead);
+            }
+            if let Some((_, old)) = self.by_expiry.pop_first() {
+                self.seen.remove(&old);
+            }
         }
         let expiry = env.ts_ms.saturating_add(max_age_ms.max(MANUAL_MAX_AGE_MS));
         self.seen.insert(nonce);
@@ -192,6 +210,12 @@ mod tests {
         let third = seal(&key, &topic, &env, &mut rng);
         assert_eq!(guard.check(&third, &opened, 1000, MAX_AGE_MS), Err(Error::TooFarAhead));
         assert_eq!(guard.check(&sealed, &opened, 1000, MAX_AGE_MS), Err(Error::Replay));
+        // On a public channel, a flood pushes the oldest out instead of shutting the channel.
+        let mut public = ReplayGuard::lossy(2);
+        for s in [&sealed, &other, &third] {
+            public.check(s, &opened, 1000, MAX_AGE_MS).unwrap();
+        }
+        assert_eq!(public.check(&third, &opened, 1000, MAX_AGE_MS), Err(Error::Replay));
         // Once they can no longer be fresh, their nonces are forgotten.
         let later = Envelope {
             ts_ms: 1000 + MANUAL_MAX_AGE_MS + 5,

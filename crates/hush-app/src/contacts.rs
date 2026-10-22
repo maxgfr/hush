@@ -24,6 +24,7 @@ use hush_core::identity::Identity;
 use hush_core::lookup::LookupKeys;
 use hush_core::{id, pow};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use tokio::sync::oneshot;
 
 use crate::api::{ChatId, ChatKind, ChatStatus, ContactInfo, EndReason, Event, LookupState, Notice, RequestInfo};
@@ -39,6 +40,10 @@ const REQUEST_WAIT: Duration = Duration::from_secs(5 * 60);
 const LOOKUP_EVERY: Duration = Duration::from_secs(4);
 const LOOKUP_TRIES: u32 = 15;
 const MAX_REQUESTS: usize = 20;
+/// How long a request's proof of work is accepted (today's or yesterday's).
+const REQUEST_REMEMBERED: Duration = Duration::from_secs(48 * 3600);
+/// Requests remembered at most (each cost its sender a proof of work).
+const MAX_REQUESTED: usize = 4096;
 
 /// Vault, contact and identifier commands.
 pub enum Cmd {
@@ -213,6 +218,10 @@ pub(crate) struct State {
     reach: Option<ChannelId>,
     last_lookup_reply: Option<Instant>,
     requests: Vec<Request>,
+    /// Every request read in the last two days, by the hash of its C1: anyone can seal one again
+    /// on our public channel, and its proof of work stays valid that long. A declined request
+    /// does not come back.
+    requested: HashMap<[u8; 32], Instant>,
     lookups: HashMap<String, Lookup>,
 }
 
@@ -222,9 +231,10 @@ fn epoch_window(now: u64) -> impl Fn(u32) -> bool {
     move |e| e <= cur + 1
 }
 
+/// An identifier's channel: its key derives from the identifier, so anyone can seal on it.
 fn lookup_channel(id_hash: &[u8; 32]) -> Channel {
     let keys = LookupKeys::new(id_hash);
-    Channel::new(keys.env_key(), move |d| keys.topic(d))
+    Channel::public(keys.env_key(), move |d| keys.topic(d))
 }
 
 fn hello_json(name: &str, sdp: Option<&str>) -> Vec<u8> {
@@ -1099,7 +1109,12 @@ impl Engine {
                     });
                 }
             }
-            ChatKind::Stranger { .. } => {
+            ChatKind::Stranger { id } => {
+                // The card of the identity this conversation was opened with, not another one
+                // the same person holds.
+                if info.identity.id() != id {
+                    return;
+                }
                 if let Some(p) = self.chats.get_mut(&chat).and_then(|c| c.peers.get_mut(tag)) {
                     p.card = Some(info);
                 }
@@ -1262,6 +1277,10 @@ impl Engine {
         {
             self.contacts.chats.remove(&old);
             self.contacts.chats.insert(key.clone(), chat);
+            // Found by identifier: that lookup is over.
+            if let Some(l) = old.strip_prefix("req:").and_then(|id| self.contacts.lookups.remove(id)) {
+                self.rdv.remove(l.channel);
+            }
         }
         self.watch();
         if existing.is_none() {
@@ -1307,11 +1326,17 @@ impl Engine {
         if env.body.len() < 40 || self.contacts.requests.len() >= MAX_REQUESTS {
             return;
         }
-        let Some(me) = self.me() else { return };
-        let my_hash = *me.public().id_hash();
+        let Some(my_hash) = self.me().map(|m| *m.public().id_hash()) else {
+            return;
+        };
         let claimed: [u8; 32] = env.body[..32].try_into().expect("32 bytes");
         let nonce = u64::from_be_bytes(env.body[32..40].try_into().expect("8 bytes"));
         let c1 = &env.body[40..];
+        // Before any costly check: a request read once is never read again.
+        let seen: [u8; 32] = Sha256::digest(c1).into();
+        if self.contacts.requested.contains_key(&seen) {
+            return;
+        }
         let lookup = LookupKeys::new(&my_hash);
         let day = hush_core::utc_day(now_ms());
         let ok = [day, day.saturating_sub(1)]
@@ -1320,11 +1345,20 @@ impl Engine {
         if !ok {
             return;
         }
+        let requested = &mut self.contacts.requested;
+        requested.retain(|_, at| at.elapsed() < REQUEST_REMEMBERED);
+        if requested.len() >= MAX_REQUESTED
+            && let Some(oldest) = requested.iter().min_by_key(|(_, at)| **at).map(|(h, _)| *h)
+        {
+            requested.remove(&oldest);
+        }
+        requested.insert(seen, Instant::now());
         let psk = lookup.psk();
         let params = ContactParams {
             psk: &psk,
             ids: (&my_hash, &claimed),
         };
+        let Some(me) = self.me() else { return };
         let Ok((pending, payload)) = ContactResponderPending::read_c1(&params, me, epoch_window(now_ms()), c1) else {
             return;
         };
