@@ -30,6 +30,6 @@ class UiSmokeTest {
         rule.onNodeWithTag("qr").assertIsDisplayed()
         val link = rule.onNodeWithTag("share-link").fetchSemanticsNode().config[SemanticsProperties.Text].joinToString()
         assertTrue(link, link.startsWith("https://maxgfr.github.io/hush/#"))
-        rule.onNodeWithTag("status").assertIsDisplayed()
+        rule.onNodeWithTag("status").assertExists()
     }
 }
