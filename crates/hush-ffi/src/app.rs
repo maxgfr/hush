@@ -612,6 +612,8 @@ impl HushApp {
             data_dir: config.data_dir.map(PathBuf::from),
             local: config.local,
             ttl: config.ttl,
+            // The app keeps received files in its own storage: gone with the message.
+            discard_files: true,
         };
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Event>();
         let host = local.map(|l| Arc::new(Host(l)) as Arc<dyn LocalHost>);

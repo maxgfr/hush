@@ -29,6 +29,7 @@ pub fn config(name: &str, out: PathBuf, data: Option<PathBuf>, relays: Vec<Strin
         data_dir: data,
         local: true,
         ttl: 0,
+        discard_files: false,
     }
 }
 

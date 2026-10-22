@@ -29,6 +29,10 @@ pub struct Config {
     pub local: bool,
     /// Message timer for what we send, in seconds (0 = off).
     pub ttl: u64,
+    /// Delete received files when they disappear, when their sender deletes them, and when the
+    /// conversation ends: the phone apps keep them where nothing else could reach them later.
+    /// The CLI saves into a folder the user chose, and leaves them there.
+    pub discard_files: bool,
 }
 
 /// What kind of link a nearby connection is, which decides its framing.

@@ -27,6 +27,8 @@ fn person(name: &str, device: Option<Arc<common::Device>>, vault: bool, relays: 
     let data = vault.then(|| dir.path().join("data"));
     let mut cfg = config(name, out, data, relays);
     cfg.local = device.is_some();
+    // Like the phone apps, the ones with nearby links.
+    cfg.discard_files = device.is_some();
     let (tx, rx) = mpsc::unbounded_channel();
     let host = device.clone().map(|d| d as Arc<dyn LocalHost>);
     let app = App::start(cfg, tx, host);
@@ -83,8 +85,13 @@ async fn message(p: &mut Person, chat: ChatId, text: &str) -> String {
     .await
 }
 
-/// Link, emojis, verification, messages both ways, a file, and the end.
-async fn link_conversation(alice: &mut Person, bob: &mut Person, expect_path: impl Fn(PathKind) -> bool) {
+/// Link, emojis, verification, messages both ways, a file, and the end. Returns where Bob saved
+/// the file.
+async fn link_conversation(
+    alice: &mut Person,
+    bob: &mut Person,
+    expect_path: impl Fn(PathKind) -> bool,
+) -> std::path::PathBuf {
     let (ca, url) = alice
         .app
         .ask(|reply| Cmd::CreateLink {
@@ -135,6 +142,30 @@ async fn link_conversation(alice: &mut Person, bob: &mut Person, expect_path: im
     });
     assert_eq!(message(alice, ca, "hello Alice\nsecond line").await, "Bob");
 
+    // Bob cannot delete what Alice wrote, nor take its id for a message of his own.
+    let id = bob
+        .ev
+        .wait("Alice's message id", |e| match e {
+            Event::Message { chat, id, text, .. } if *chat == cb && text == "hello Bob" => Some(id.clone()),
+            _ => None,
+        })
+        .await;
+    bob.app.send(Cmd::Delete {
+        chat: cb,
+        id: id.clone(),
+    });
+    bob.app.send(Cmd::Send {
+        chat: cb,
+        text: "after".into(),
+    });
+    message(alice, ca, "after").await;
+    let deleted = alice
+        .ev
+        .seen
+        .iter()
+        .any(|e| matches!(e, Event::MessageDeleted { id: d, .. } if *d == id));
+    assert!(!deleted, "a peer deleted someone else's message");
+
     // A file, bigger than a chunk.
     let src = alice._dir.path().join("photo.bin");
     let data: Vec<u8> = (0..300_000u32).map(|i| (i * 31 % 251) as u8).collect();
@@ -161,7 +192,7 @@ async fn link_conversation(alice: &mut Person, bob: &mut Person, expect_path: im
             _ => None,
         })
         .await;
-    assert_eq!(std::fs::read(saved).unwrap(), data);
+    assert_eq!(std::fs::read(&saved).unwrap(), data);
     alice
         .ev
         .wait("delivery", |e| {
@@ -178,6 +209,7 @@ async fn link_conversation(alice: &mut Person, bob: &mut Person, expect_path: im
         })
         .await;
     assert_eq!(reason, EndReason::PeerLeft);
+    saved
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -185,7 +217,8 @@ async fn over_wifi_without_any_network() {
     let air = Air::new(LocalKind::Stream);
     let mut alice = person("Alice", Some(air.device()), false, vec![]);
     let mut bob = person("Bob", Some(air.device()), false, vec![]);
-    link_conversation(&mut alice, &mut bob, |p| p == PathKind::Local(LocalMedium::Wifi)).await;
+    let saved = link_conversation(&mut alice, &mut bob, |p| p == PathKind::Local(LocalMedium::Wifi)).await;
+    assert!(!saved.exists(), "a phone keeps no file once the conversation ended");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -201,7 +234,8 @@ async fn over_a_relay_and_webrtc() {
     let r = relay().await;
     let mut alice = person("Alice", None, false, vec![r.clone()]);
     let mut bob = person("Bob", None, false, vec![r]);
-    link_conversation(&mut alice, &mut bob, |p| p == PathKind::Direct).await;
+    let saved = link_conversation(&mut alice, &mut bob, |p| p == PathKind::Direct).await;
+    assert!(saved.exists(), "the CLI leaves files where the user asked");
 }
 
 #[tokio::test(flavor = "multi_thread")]

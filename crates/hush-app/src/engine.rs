@@ -49,6 +49,8 @@ pub(crate) const PENDING_TIMEOUT: Duration = Duration::from_secs(45);
 /// Images that download by themselves, from verified peers, a few at a time.
 const AUTO_DOWNLOAD: u64 = 8 * 1024 * 1024;
 const AUTO_DOWNLOADS: usize = 3;
+/// Files sent to one peer at once.
+const MAX_UPLOADS: usize = 8;
 /// Frames held for a peer until a path works.
 const MAX_QUEUED_FRAMES: usize = 256;
 
@@ -309,6 +311,13 @@ pub(crate) struct Chat {
     pub peers: HashMap<PeerTag, Peer>,
     locked: bool,
     outgoing: HashMap<String, OutFile>,
+    /// Who wrote each message and file (`None`: us). An id is its author's: a peer cannot take
+    /// one already used, nor delete someone else's.
+    authors: HashMap<String, Option<PeerTag>>,
+    /// When offered files disappear.
+    expiry: HashMap<String, u64>,
+    /// Where received files were saved.
+    received: HashMap<String, PathBuf>,
     pub ended: bool,
 }
 
@@ -322,6 +331,9 @@ impl Chat {
             peers: HashMap::new(),
             locked: false,
             outgoing: HashMap::new(),
+            authors: HashMap::new(),
+            expiry: HashMap::new(),
+            received: HashMap::new(),
             ended: false,
         }
     }
@@ -597,6 +609,24 @@ impl Engine {
                     self.fail_wanted(id, &tag);
                 }
                 self.pump(id, &tag);
+            }
+        }
+        if self.cfg.discard_files {
+            let gone: Vec<(ChatId, String)> = self
+                .chats
+                .iter()
+                .flat_map(|(chat, c)| {
+                    c.expiry
+                        .iter()
+                        .filter(|(_, at)| **at <= now)
+                        .map(|(id, _)| (*chat, id.clone()))
+                })
+                .collect();
+            for (chat, id) in gone {
+                if let Some(c) = self.chats.get_mut(&chat) {
+                    c.expiry.remove(&id);
+                }
+                self.discard_received(chat, &id);
             }
         }
         self.contacts_tick();
@@ -1249,6 +1279,7 @@ impl Engine {
         let Some(c) = self.chats.get_mut(&chat) else { return };
         let Some(p) = c.peers.remove(tag) else { return };
         let group = c.group;
+        discard_partial(&p);
         if let Some(r) = p.rtc.clone() {
             close_later(r);
         }
@@ -1302,7 +1333,15 @@ impl Engine {
             rtcs.extend(l.awaiting.drain().filter_map(|(_, v)| v.rtc));
             rtcs.extend(l.joining.drain().map(|(_, v)| v.2));
         }
+        for p in c.peers.values() {
+            discard_partial(p);
+        }
         c.peers.clear();
+        if self.cfg.discard_files {
+            for (_, path) in c.received.drain() {
+                let _ = std::fs::remove_file(path);
+            }
+        }
         for r in rtcs {
             close_later(r);
         }
@@ -1408,6 +1447,13 @@ impl Engine {
         };
         let author = p.name.clone();
         let verified = p.verified();
+        if let ChatMsg::Msg { id, .. } | ChatMsg::File(FileMeta { id, .. }) = &m {
+            let Some(c) = self.chats.get_mut(&chat) else { return };
+            if c.authors.contains_key(id) {
+                return;
+            }
+            c.authors.insert(id.clone(), Some(*tag));
+        }
         match m {
             ChatMsg::Msg { id, text, ttl } => {
                 let text = clean_text(&text);
@@ -1425,12 +1471,27 @@ impl Engine {
                 });
             }
             ChatMsg::Del { id } => {
+                let Some(c) = self.chats.get_mut(&chat) else { return };
+                if c.authors.get(&id) != Some(&Some(*tag)) {
+                    return;
+                }
+                c.authors.remove(&id);
                 self.forget_history(chat, &id);
+                self.discard_received(chat, &id);
                 self.emit(Event::MessageDeleted { chat, id });
             }
             ChatMsg::File(meta) => {
-                let auto = proto::previewable(&meta.mime) && meta.size <= AUTO_DOWNLOAD && verified;
+                // The name's extension must agree too: it decides how the file opens once saved.
+                let auto = proto::previewable(&meta.mime)
+                    && proto::previewable(guess_mime(&meta.name))
+                    && meta.size <= AUTO_DOWNLOAD
+                    && verified;
                 let id = meta.id.clone();
+                if let Some(t) = meta.ttl
+                    && let Some(c) = self.chats.get_mut(&chat)
+                {
+                    c.expiry.insert(id.clone(), now + t * 1000);
+                }
                 self.emit(Event::FileOffered {
                     chat,
                     peer: Some(peer),
@@ -1495,6 +1556,9 @@ impl Engine {
             ts + self.cfg.ttl * 1000
         });
         self.broadcast_app(chat, lane::CHAT, &v);
+        if let Some(c) = self.chats.get_mut(&chat) {
+            c.authors.insert(id.clone(), None);
+        }
         self.keep_history(chat, &id, true, ts, text, expires_at);
         self.emit(Event::Message {
             chat,
@@ -1510,7 +1574,11 @@ impl Engine {
 
     fn delete_message(&mut self, chat: ChatId, id: &str) {
         self.broadcast_app(chat, lane::CHAT, &json!({"t": "del", "id": id}));
+        if let Some(c) = self.chats.get_mut(&chat) {
+            c.authors.remove(id);
+        }
         self.forget_history(chat, id);
+        self.discard_received(chat, id);
         self.emit(Event::MessageDeleted {
             chat,
             id: id.to_string(),
@@ -1594,6 +1662,16 @@ impl Engine {
         }
     }
 
+    /// Deletes a file we received, where the app keeps them (`Config::discard_files`).
+    fn discard_received(&mut self, chat: ChatId, id: &str) {
+        if !self.cfg.discard_files {
+            return;
+        }
+        if let Some(path) = self.chats.get_mut(&chat).and_then(|c| c.received.remove(id)) {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
     fn forget_history(&self, chat: ChatId, id: &str) {
         if let Some(key) = self.chats.get(&chat).and_then(|c| c.contact_key())
             && self.store.is_unlocked()
@@ -1636,6 +1714,7 @@ impl Engine {
         });
         if let Some(c) = self.chats.get_mut(&chat) {
             c.outgoing.insert(id.clone(), OutFile { path, size });
+            c.authors.insert(id.clone(), None);
         }
         self.broadcast_app(chat, lane::CHAT, &offer);
         self.emit(Event::FileOffered {
@@ -1651,9 +1730,15 @@ impl Engine {
     }
 
     fn start_upload(&mut self, chat: ChatId, tag: &PeerTag, id: &str) {
-        let Some(out) = self.chats.get(&chat).and_then(|c| c.outgoing.get(id)) else {
+        let Some(c) = self.chats.get(&chat) else { return };
+        let Some(out) = c.outgoing.get(id) else { return };
+        let Some(p) = c.peers.get(tag) else { return };
+        // One upload of a file per peer, a few at once, and only on a path that carries files:
+        // asking again and again must not open the file again and again.
+        let carries = p.rtc_open || p.local.is_some_and(|l| self.links.contains_key(&l));
+        if !carries || p.uploads.len() >= MAX_UPLOADS || p.uploads.iter().any(|u| u.id == id) {
             return;
-        };
+        }
         let Ok(file) = std::fs::File::open(&out.path) else {
             return;
         };
@@ -1851,8 +1936,21 @@ impl Engine {
                 }
             }
         }
-        if let Some((f, _)) = dl.file.as_mut() {
-            let _ = f.write_all(body);
+        if let Some((f, _)) = dl.file.as_mut()
+            && let Err(e) = f.write_all(body)
+        {
+            // A full disk: the file would be saved truncated.
+            if let Some(dl) = p.downloads.remove(&id)
+                && let Some((_, path)) = dl.file
+            {
+                let _ = std::fs::remove_file(path);
+            }
+            self.emit(Event::FileFailed {
+                chat,
+                id,
+                reason: e.to_string(),
+            });
+            return;
         }
         dl.hasher.update(body);
         dl.got += body.len() as u64;
@@ -1895,6 +1993,9 @@ impl Engine {
         };
         drop(file);
         if hex::encode(dl.hasher.finalize()) == dl.meta.sha256 {
+            if let Some(c) = self.chats.get_mut(&chat) {
+                c.received.insert(id.to_string(), path.clone());
+            }
             self.send_app(chat, tag, lane::CHAT, json!({"t": "file-end", "id": id}));
             self.emit(Event::FileSaved {
                 chat,
@@ -2098,6 +2199,15 @@ impl Engine {
         if scan != self.scanned {
             self.scanned = scan.clone();
             host.scan(scan);
+        }
+    }
+}
+
+/// Files a peer was still sending: half a file is of no use to anyone.
+fn discard_partial(p: &Peer) {
+    for dl in p.downloads.values() {
+        if let Some((_, path)) = &dl.file {
+            let _ = std::fs::remove_file(path);
         }
     }
 }

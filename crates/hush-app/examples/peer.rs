@@ -37,6 +37,7 @@ async fn main() {
         data_dir: data,
         local: false,
         ttl: 0,
+        discard_files: false,
     };
     let (tx, mut rx) = mpsc::unbounded_channel();
     let app = App::start(cfg, tx, None);

@@ -202,6 +202,8 @@ impl NetArgs {
             data_dir: None,
             local: false,
             ttl: self.ttl.min(30 * 86_400),
+            // Saved where the user asked: theirs to keep.
+            discard_files: false,
         }
     }
 
