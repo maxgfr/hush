@@ -29,6 +29,7 @@ import {
 } from "../core/wasm";
 import { concat, equalBytes, fromB64u, fromHex, toB64u, toHex } from "../lib/bytes";
 import type { Rendezvous } from "../net/rendezvous";
+import { t } from "../ui/i18n";
 import { Chat, type ChatHooks, type ChatItem, type Pending } from "./chat";
 import type { PeerConn } from "./peer";
 import { decodeHello, encodeJson } from "./protocol";
@@ -119,6 +120,7 @@ export class Contacts {
   private readonly handshaking = new Map<string, number>();
   private readonly savingFor = new WeakSet<PeerConn>();
   private readonly received = new WeakMap<PeerConn, BundleInfo>();
+  private readonly secrets = new WeakMap<PeerConn, Uint8Array>();
   private reach: { channel: Channel; off: () => void } | null = null;
   private timer: ReturnType<typeof setInterval> | undefined;
 
@@ -151,16 +153,34 @@ export class Contacts {
   // Saving a contact from a conversation
 
   /** "Save contact" on a verified peer: sends our card; saved once theirs arrives. */
-  async offerCard(chat: Chat, peer: PeerConn): Promise<"saved" | "waiting"> {
-    const me = await ensureIdentity(this.myName());
+  async offerCard(chat: Chat, peer: PeerConn): Promise<"saved" | "waiting" | "gone"> {
+    // Read the session's contact secret now: the other side may end the session at any time.
+    if (!this.capture(peer)) return "gone";
     this.savingFor.add(peer);
-    await chat.sendCard(peer, me.card(this.myName(), peer.hash, Date.now()));
+    const me = await ensureIdentity(this.myName());
+    try {
+      await chat.sendCard(peer, me.card(this.myName(), peer.hash, Date.now()));
+    } catch {
+      return "gone";
+    }
     const theirs = this.received.get(peer);
     if (theirs) {
-      await this.store(peer, theirs);
+      await this.store(peer, theirs, chat);
       return "saved";
     }
     return "waiting";
+  }
+
+  /** Keeps the contact secret of a live session; false once the session is gone. */
+  private capture(peer: PeerConn): boolean {
+    if (this.secrets.has(peer)) return true;
+    if (peer.state.value === "closed") return false;
+    try {
+      this.secrets.set(peer, peer.session.contactSecret());
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private onCard(chat: Chat, peer: PeerConn, card: Uint8Array): void {
@@ -171,18 +191,19 @@ export class Contacts {
       return;
     }
     this.received.set(peer, info);
+    this.capture(peer);
     if (chat instanceof ContactChat) {
       // A known contact refreshing its bundle (new prekey, new name).
       const c = chat.contact ?? contacts.value.find((x) => x.key === hex(info.idHash));
       if (c && c.key === hex(info.idHash) && this.me()) {
         void saveContact({ ...c, bundle: toB64u(info.bytes), name: info.name || c.name });
       } else if (!c && this.me()) {
-        void this.store(peer, info);
+        void this.store(peer, info, chat);
       }
       return;
     }
     if (this.savingFor.has(peer)) {
-      void this.store(peer, info);
+      void this.store(peer, info, chat);
     } else {
       this.offers.value = [
         ...this.offers.value.filter((o) => o.peer !== peer),
@@ -194,16 +215,18 @@ export class Contacts {
   /** The user accepted a card offer. */
   async acceptOffer(offer: CardOffer): Promise<void> {
     this.offers.value = this.offers.value.filter((o) => o !== offer);
-    await this.offerCard(offer.chat, offer.peer);
-    await this.store(offer.peer, offer.info);
+    if ((await this.offerCard(offer.chat, offer.peer)) === "waiting") {
+      await this.store(offer.peer, offer.info, offer.chat);
+    }
   }
 
   dismissOffer(offer: CardOffer): void {
     this.offers.value = this.offers.value.filter((o) => o !== offer);
   }
 
-  private async store(peer: PeerConn, info: BundleInfo): Promise<void> {
-    if (!this.me()) return;
+  private async store(peer: PeerConn, info: BundleInfo, chat?: Chat): Promise<void> {
+    const secret = this.secrets.get(peer);
+    if (!this.me() || !secret) return;
     const key = hex(info.idHash);
     const existing = contacts.value.find((c) => c.key === key);
     await saveContact({
@@ -211,11 +234,15 @@ export class Contacts {
       key,
       name: info.name || peer.name.value || existing?.name || info.id.slice(0, 12),
       bundle: toB64u(info.bytes),
-      secret: toB64u(peer.session.contactSecret()),
+      secret: toB64u(secret),
       added: existing?.added ?? Date.now(),
       history: existing?.history ?? false,
     });
     this.watch();
+    if (!existing)
+      chat?.announce(
+        t("contactSaved", { name: info.name || peer.name.value || info.id.slice(0, 12) }),
+      );
   }
 
   isSaved(peer: PeerConn): boolean {

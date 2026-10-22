@@ -225,6 +225,7 @@ export function ChatScreen(props: { chat: Chat }): JSX.Element {
       return;
     }
     const r = await contactsManager().offerCard(chat, peer);
+    if (r === "gone") return;
     setNote(
       r === "saved"
         ? t("contactSaved", { name: peer.name.value || t("them") })

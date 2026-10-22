@@ -37,6 +37,8 @@ test("save a contact, reconnect without a link, keep history, back up and restor
   await expect(alice.page.getByText("Request sent, waiting for Bob.")).toBeVisible();
   await expect(bob.page.getByText("Alice wants to save you as a contact.")).toBeVisible();
   await bob.page.getByRole("button", { name: "Save contact" }).click();
+  await expect(alice.page.getByText("Bob is in your contacts.")).toBeVisible();
+  await expect(bob.page.getByText("Alice is in your contacts.")).toBeVisible();
 
   await alice.page.getByTestId("end").click();
   // With an unlocked vault, "New conversation" goes home without reloading (contacts stay live).
@@ -99,5 +101,30 @@ test("add someone by identifier, with their consent", async ({ browser }) => {
   await bob.page.getByRole("button", { name: "Accept" }).click();
   await say(bob, "welcome");
   await expect(alice.page.getByText("welcome")).toBeVisible({ timeout: 60_000 });
+  await close(alice, bob);
+});
+
+test("ending the conversation while a contact is being saved fails cleanly", async ({
+  browser,
+}) => {
+  const alice = await person(browser, "Alice");
+  const bob = await person(browser, "Bob");
+  await open(alice);
+  await open(bob);
+  await createVault(alice.page);
+  await createVault(bob.page);
+  await verifiedPair(alice, bob);
+  await alice.page.getByRole("button", { name: "Menu" }).click();
+  await alice.page.getByRole("menuitem", { name: "Save contact" }).click();
+  await expect(bob.page.getByText("Alice wants to save you as a contact.")).toBeVisible();
+  // Alice leaves at the very moment Bob accepts.
+  await Promise.all([
+    alice.page.getByTestId("end").click(),
+    bob.page.getByRole("button", { name: "Save contact" }).click(),
+  ]);
+  await expect(
+    bob.page.getByRole("heading", { name: "The other person ended the conversation" }),
+  ).toBeVisible();
+  await bob.page.waitForTimeout(500);
   await close(alice, bob);
 });

@@ -275,6 +275,11 @@ export abstract class Chat {
     this.items.value = [...this.items.value, item];
   }
 
+  /** A system line in the conversation (e.g. "Bob is in your contacts."). */
+  announce(text: string): void {
+    this.notice(text);
+  }
+
   protected notice(text: string): void {
     this.push({ id: newId(), from: undefined, author: "", ts: Date.now(), text });
   }

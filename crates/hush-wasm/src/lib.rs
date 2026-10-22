@@ -379,9 +379,13 @@ impl Session {
         self.inner.epoch()
     }
 
+    /// Throws `BadState` once the session is closed (its keys are erased).
     #[wasm_bindgen(js_name = contactSecret)]
-    pub fn contact_secret(&self) -> Vec<u8> {
-        self.inner.contact_secret().to_vec()
+    pub fn contact_secret(&self) -> Result<Vec<u8>, JsError> {
+        if self.inner.is_closed() {
+            return Err(err(Error::BadState));
+        }
+        Ok(self.inner.contact_secret().to_vec())
     }
 
     #[wasm_bindgen(js_name = handshakeHash)]
