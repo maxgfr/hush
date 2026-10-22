@@ -1,0 +1,131 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Must match the wasm-bindgen crate in Cargo.lock (web/scripts/build-wasm.ts checks it).
+  WASM_BINDGEN: 0.2.128
+
+jobs:
+  rust:
+    name: Rust (fmt, clippy, tests, wasm, mobile bindings)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install stable --profile minimal --component rustfmt,clippy --target wasm32-unknown-unknown && rustup default stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+      - run: cargo test -p hush-core --no-default-features --locked
+      - name: One getrandom in the WebAssembly build
+        run: |
+          n=$(cargo tree -p hush-wasm --target wasm32-unknown-unknown -e normal -i getrandom --prefix none 2>/dev/null | grep -c '^getrandom' || true)
+          echo "getrandom versions in the wasm build: $n"
+          [ "$n" -le 1 ]
+      - run: cargo build -p hush-wasm --profile wasm --target wasm32-unknown-unknown --locked
+      - name: Kotlin and Swift bindings generate
+        run: |
+          cargo build -p hush-ffi --release --locked
+          cargo run -p hush-ffi --features cli --bin uniffi-bindgen --locked -- generate --library target/release/libhush_ffi.so --language kotlin --out-dir bindings/kotlin --no-format
+          cargo run -p hush-ffi --features cli --bin uniffi-bindgen --locked -- generate --library target/release/libhush_ffi.so --language swift --out-dir bindings/swift
+          ls -R bindings
+
+  web:
+    name: Web (typecheck, lint, unit, build, size)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install stable --profile minimal --target wasm32-unknown-unknown && rustup default stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: cargo install wasm-bindgen-cli --version "$WASM_BINDGEN" --locked
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - run: bun install --frozen-lockfile
+      - run: bun run wasm
+      - run: bun run typecheck
+      - run: bun run lint
+      - run: bun run test
+      - run: bun run build
+      - run: bun run check-size
+
+  e2e:
+    name: End-to-end (Chromium, phone, CLI interop)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install stable --profile minimal --target wasm32-unknown-unknown && rustup default stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: cargo install wasm-bindgen-cli --version "$WASM_BINDGEN" --locked
+      - run: cargo build -p hush-cli --locked
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - run: bun install --frozen-lockfile
+      - run: bun run wasm
+      - run: bunx playwright install --with-deps chromium
+      - run: bun run test:e2e --project=chromium --project=mobile
+        env:
+          CI: "true"
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-chromium
+          path: web/test-results/
+          retention-days: 7
+
+  e2e-webkit:
+    # Playwright's Linux WebKit cannot open WebRTC connections: Safari's engine is tested on macOS.
+    name: End-to-end (WebKit)
+    runs-on: macos-15
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install stable --profile minimal --target wasm32-unknown-unknown && rustup default stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: cargo install wasm-bindgen-cli --version "$WASM_BINDGEN" --locked
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - run: bun install --frozen-lockfile
+      - run: bun run wasm
+      - run: bunx playwright install webkit
+      - run: bun run test:e2e --project=webkit
+        env:
+          CI: "true"
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-webkit
+          path: web/test-results/
+          retention-days: 7
