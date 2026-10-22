@@ -120,7 +120,11 @@ test("ending the conversation while a contact is being saved fails cleanly", asy
   // Alice leaves at the very moment Bob accepts.
   await Promise.all([
     alice.page.getByTestId("end").click(),
-    bob.page.getByRole("button", { name: "Save contact" }).click(),
+    // The button may already be gone if Alice's farewell wins the race: both outcomes are fine.
+    bob.page
+      .getByRole("button", { name: "Save contact" })
+      .click({ timeout: 5000 })
+      .catch(() => {}),
   ]);
   await expect(
     bob.page.getByRole("heading", { name: "The other person ended the conversation" }),
