@@ -1,0 +1,78 @@
+package io.github.maxgfr.hush.core
+
+/**
+ * The 64 emojis of the short authentication string, in the order of crates/hush-core/src/sas.rs
+ * (Matrix's table), with their English and French names.
+ */
+object Sas {
+    data class Emoji(val glyph: String, val en: String, val fr: String)
+
+    val TABLE: List<Emoji> = listOf(
+        Emoji("🐶", "Dog", "Chien"),
+        Emoji("🐱", "Cat", "Chat"),
+        Emoji("🦁", "Lion", "Lion"),
+        Emoji("🐎", "Horse", "Cheval"),
+        Emoji("🦄", "Unicorn", "Licorne"),
+        Emoji("🐷", "Pig", "Cochon"),
+        Emoji("🐘", "Elephant", "Éléphant"),
+        Emoji("🐰", "Rabbit", "Lapin"),
+        Emoji("🐼", "Panda", "Panda"),
+        Emoji("🐓", "Rooster", "Coq"),
+        Emoji("🐧", "Penguin", "Pingouin"),
+        Emoji("🐢", "Turtle", "Tortue"),
+        Emoji("🐟", "Fish", "Poisson"),
+        Emoji("🐙", "Octopus", "Pieuvre"),
+        Emoji("🦋", "Butterfly", "Papillon"),
+        Emoji("🌷", "Flower", "Fleur"),
+        Emoji("🌳", "Tree", "Arbre"),
+        Emoji("🌵", "Cactus", "Cactus"),
+        Emoji("🍄", "Mushroom", "Champignon"),
+        Emoji("🌏", "Globe", "Globe"),
+        Emoji("🌙", "Moon", "Lune"),
+        Emoji("☁️", "Cloud", "Nuage"),
+        Emoji("🔥", "Fire", "Feu"),
+        Emoji("🍌", "Banana", "Banane"),
+        Emoji("🍎", "Apple", "Pomme"),
+        Emoji("🍓", "Strawberry", "Fraise"),
+        Emoji("🌽", "Corn", "Maïs"),
+        Emoji("🍕", "Pizza", "Pizza"),
+        Emoji("🎂", "Cake", "Gâteau"),
+        Emoji("❤️", "Heart", "Cœur"),
+        Emoji("😀", "Smiley", "Sourire"),
+        Emoji("🤖", "Robot", "Robot"),
+        Emoji("🎩", "Hat", "Chapeau"),
+        Emoji("👓", "Glasses", "Lunettes"),
+        Emoji("🔧", "Spanner", "Clé à molette"),
+        Emoji("🎅", "Santa", "Père Noël"),
+        Emoji("👍", "Thumbs up", "Pouce"),
+        Emoji("☂️", "Umbrella", "Parapluie"),
+        Emoji("⌛", "Hourglass", "Sablier"),
+        Emoji("⏰", "Clock", "Réveil"),
+        Emoji("🎁", "Gift", "Cadeau"),
+        Emoji("💡", "Light bulb", "Ampoule"),
+        Emoji("📕", "Book", "Livre"),
+        Emoji("✏️", "Pencil", "Crayon"),
+        Emoji("📎", "Paperclip", "Trombone"),
+        Emoji("✂️", "Scissors", "Ciseaux"),
+        Emoji("🔒", "Lock", "Cadenas"),
+        Emoji("🔑", "Key", "Clé"),
+        Emoji("🔨", "Hammer", "Marteau"),
+        Emoji("☎️", "Telephone", "Téléphone"),
+        Emoji("🏁", "Flag", "Drapeau"),
+        Emoji("🚂", "Train", "Train"),
+        Emoji("🚲", "Bicycle", "Vélo"),
+        Emoji("✈️", "Aeroplane", "Avion"),
+        Emoji("🚀", "Rocket", "Fusée"),
+        Emoji("🏆", "Trophy", "Trophée"),
+        Emoji("⚽", "Ball", "Ballon"),
+        Emoji("🎸", "Guitar", "Guitare"),
+        Emoji("🎺", "Trumpet", "Trompette"),
+        Emoji("🔔", "Bell", "Cloche"),
+        Emoji("⚓", "Anchor", "Ancre"),
+        Emoji("🎧", "Headphones", "Casque"),
+        Emoji("📁", "Folder", "Dossier"),
+        Emoji("📌", "Pin", "Punaise"),
+    )
+
+    fun emoji(index: Int): Emoji = TABLE[index and 63]
+}

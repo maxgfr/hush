@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lint>
+    <!-- The engine's bindings are generated (mobile/scripts/build-android.sh), not ours to fix. -->
+    <issue id="all">
+        <ignore path="src/main/java/uniffi/**" />
+    </issue>
+    <!-- Versions are chosen together in gradle/libs.versions.toml; targetSdk 35 is deliberate. -->
+    <issue id="GradleDependency" severity="ignore" />
+    <issue id="NewerVersionAvailable" severity="ignore" />
+    <issue id="OldTargetApi" severity="ignore" />
+    <issue id="AndroidGradlePluginVersion" severity="ignore" />
+</lint>
