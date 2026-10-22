@@ -84,8 +84,8 @@ test("a browser and the Rust engine save each other, then reconnect without a li
 
   const link = await createLink(alice);
   r.send(`join ${link}`);
-  const chat = (await r.line(/^joined (\d+)/))[1];
-  const peer = (await r.line(new RegExp(`^peer-joined ${chat} ([0-9a-f]+) Alice`)))[1];
+  const chat = (await r.line(/^joined (\d+)/))[1] ?? "";
+  const peer = (await r.line(new RegExp(`^peer-joined ${chat} ([0-9a-f]+) Alice`)))[1] ?? "";
   await alice.page.getByRole("button", { name: "They match" }).click();
   r.send(`verify ${chat}`);
   await expect(alice.page.getByText("Verified")).toBeVisible();
@@ -104,7 +104,7 @@ test("a browser and the Rust engine save each other, then reconnect without a li
   await alice.page.getByRole("button", { name: "Contacts" }).click();
   // Both online: the contact handshake runs by itself.
   await expect(alice.page.getByText("online", { exact: true })).toBeVisible({ timeout: 60_000 });
-  const contactChat = (await r.line(/^chat (\d+) Contact/))[1];
+  const contactChat = (await r.line(/^chat (\d+) Contact/))[1] ?? "";
   await r.line(new RegExp(`^peer-joined ${contactChat} [0-9a-f]+ Alice`));
   await alice.page.getByRole("button", { name: /Robot/ }).click();
   await say(alice, "back again, no link needed");
@@ -120,7 +120,7 @@ test("a browser asks the Rust engine by identifier", async ({ browser }) => {
   r.send(`vault ${PASS}`);
   await r.line(/^vault ok/);
   r.send("identity");
-  const id = (await r.line(/^identity (hush1[a-z0-9]+)/))[1];
+  const id = (await r.line(/^identity (hush1[a-z0-9]+)/))[1] ?? "";
   r.send("reachable");
   await r.line(/^Reachable\(true\)/);
 
@@ -137,7 +137,7 @@ test("a browser asks the Rust engine by identifier", async ({ browser }) => {
 
   await r.line(new RegExp(`^requests .*${aliceId}=Alice`));
   r.send(`accept ${aliceId}`);
-  const chat = (await r.line(/^peer-joined (\d+) [0-9a-f]+ Alice/))[1];
+  const chat = (await r.line(/^peer-joined (\d+) [0-9a-f]+ Alice/))[1] ?? "";
   r.send(`send ${chat} hello from Rust`);
   await expect(alice.page.getByText("hello from Rust")).toBeVisible({ timeout: 60_000 });
   await say(alice, "hello from the browser");
