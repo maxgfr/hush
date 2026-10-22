@@ -227,12 +227,20 @@ impl Events {
 
 /// A Nostr relay that does just what hush needs: ephemeral events of kind 21918, `#t` filters.
 pub async fn relay() -> String {
+    relay_with_tap().await.0
+}
+
+/// The relay, and every event published on it as `(topic hex, content)`: what anyone subscribed
+/// to the kind sees.
+pub async fn relay_with_tap() -> (String, mpsc::UnboundedReceiver<(String, String)>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let (bus, _) = tokio::sync::broadcast::channel::<Value>(4096);
+    let (tap, tapped) = mpsc::unbounded_channel();
     tokio::spawn(async move {
         while let Ok((stream, _)) = listener.accept().await {
             let bus = bus.clone();
+            let tap = tap.clone();
             tokio::spawn(async move {
                 let Ok(ws) = tokio_tungstenite::accept_async(stream).await else {
                     return;
@@ -251,7 +259,14 @@ pub async fn relay() -> String {
                                     subs.insert(v[1].as_str().unwrap_or("").to_string(), topics);
                                 }
                                 Some("CLOSE") => { subs.remove(v[1].as_str().unwrap_or("")); }
-                                Some("EVENT") => { let _ = bus.send(v[1].clone()); }
+                                Some("EVENT") => {
+                                    let ev = &v[1];
+                                    let tagged = (ev["tags"][0][1].as_str(), ev["content"].as_str());
+                                    if let (Some(topic), Some(content)) = tagged {
+                                        let _ = tap.send((topic.to_string(), content.to_string()));
+                                    }
+                                    let _ = bus.send(ev.clone());
+                                }
                                 _ => {}
                             }
                         }
@@ -269,5 +284,5 @@ pub async fn relay() -> String {
             });
         }
     });
-    format!("ws://{addr}")
+    (format!("ws://{addr}"), tapped)
 }

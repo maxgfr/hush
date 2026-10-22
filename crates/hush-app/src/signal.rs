@@ -269,6 +269,16 @@ pub enum Via {
     Local(LinkId),
 }
 
+impl Via {
+    /// The nearby link it came over.
+    pub fn link(&self) -> Option<LinkId> {
+        match self {
+            Via::Local(l) => Some(*l),
+            _ => None,
+        }
+    }
+}
+
 pub struct Rendezvous {
     pub tag: PeerTag,
     outs: Vec<mpsc::UnboundedSender<OutCmd>>,
@@ -378,13 +388,13 @@ impl Rendezvous {
         let (ch, _) = self.channels.get_mut(&id)?;
         let sealed = &data[32..];
         let env = envelope::open(&ch.key, &topic, sealed).ok()?;
-        // Authentic: whatever the replay guard says, this peer is reachable on this link (the
-        // same envelope may have come through a relay first).
+        // Envelopes are public on the relays: anyone nearby can replay one. Only a first arrival
+        // says its sender may be on this link (a copy the relay brought first proves nothing).
+        ch.guard.check(sealed, &env, now_ms(), envelope::MAX_AGE_MS).ok()?;
         self.local.entry(link).or_default().insert(id);
         if env.from != self.tag {
             self.local_peers.insert((id, env.from), link);
         }
-        ch.guard.check(sealed, &env, now_ms(), envelope::MAX_AGE_MS).ok()?;
         if env.from == self.tag || (env.to != envelope::BROADCAST && env.to != self.tag) {
             return None;
         }

@@ -5,10 +5,12 @@ mod common;
 
 use std::sync::Arc;
 
-use common::{Air, Events, config, relay};
+use common::{Air, Events, config, relay, relay_with_tap};
 use hush_app::contacts::Cmd as ContactCmd;
+use hush_app::signal::LinkId;
 use hush_app::{
-    App, ChatId, ChatKind, Cmd, EndReason, Event, LocalHost, LocalKind, LocalMedium, LookupState, Notice, PathKind,
+    App, ChatId, ChatKind, Cmd, EndReason, Event, LocalHost, LocalIn, LocalKind, LocalMedium, LookupState, Notice,
+    PathKind,
 };
 use tokio::sync::mpsc;
 
@@ -539,4 +541,88 @@ async fn a_request_by_identifier() {
         text: "hi, it's Bob".into(),
     });
     assert_eq!(message(&mut alice, ca, "hi, it's Bob").await, "Bob");
+}
+
+/// A nearby device holding no key: it only keeps what the engine writes to it.
+#[derive(Default)]
+struct Eavesdropper(std::sync::Mutex<Vec<(LinkId, Vec<u8>)>>);
+
+impl LocalHost for Eavesdropper {
+    fn advertise(&self, _: Vec<Vec<u8>>) {}
+    fn scan(&self, _: Vec<Vec<u8>>) {}
+    fn send(&self, link: LinkId, data: Vec<u8>) {
+        self.0.lock().unwrap().push((link, data));
+    }
+    fn close(&self, _: LinkId) {}
+}
+
+/// Envelopes are public on the relays. Someone nearby replaying one of them over a link must not
+/// draw that peer's session to it (where it would drop everything).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_replayed_envelope_draws_no_session() {
+    let (r, mut tap) = relay_with_tap().await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut cfg = config("Alice", dir.path().to_path_buf(), None, vec![r.clone()]);
+    cfg.local = true;
+    let nearby = Arc::new(Eavesdropper::default());
+    let (tx, rx) = mpsc::unbounded_channel();
+    let app = App::start(cfg, tx, Some(nearby.clone() as Arc<dyn LocalHost>));
+    let mut alice = Person {
+        app,
+        ev: Events::new(rx),
+        _dir: dir,
+    };
+    let mut bob = person("Bob", None, false, vec![r]);
+    alice.app.local(LocalIn::Opened {
+        link: 99,
+        kind: LocalKind::Stream,
+        medium: LocalMedium::Wifi,
+        token: None,
+    });
+    let (ca, url) = alice
+        .app
+        .ask(|reply| Cmd::CreateLink {
+            group: false,
+            ttl_min: 10,
+            passphrase: None,
+            reply,
+        })
+        .await
+        .unwrap();
+    let cb: ChatId = bob
+        .app
+        .ask(|reply| Cmd::JoinLink {
+            input: url,
+            passphrase: None,
+            reply,
+        })
+        .await
+        .unwrap();
+
+    // Bob's HS1 as the relay shows it, replayed over the link once Alice answered it.
+    let (topic, content) = tap.recv().await.unwrap();
+    let _hs2 = tap.recv().await.unwrap();
+    let mut record = hex::decode(topic).unwrap();
+    record.extend(hush_core::b64::decode(&content).unwrap());
+    alice.app.local(LocalIn::Data {
+        link: 99,
+        data: hush_core::stream::encode_record(255, &record),
+    });
+
+    joined(&mut alice, ca).await;
+    joined(&mut bob, cb).await;
+    assert_eq!(path(&mut alice, ca).await, PathKind::Direct);
+    alice.app.send(Cmd::Send {
+        chat: ca,
+        text: "hello bob".into(),
+    });
+    message(&mut bob, cb, "hello bob").await;
+    let drawn = nearby
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(l, d)| *l == 99 && d[0] < 4)
+        .count();
+    assert_eq!(drawn, 0, "session records went to the replaying device");
 }

@@ -30,7 +30,7 @@ use crate::api::{ChatId, ChatKind, ChatStatus, ContactInfo, EndReason, Event, Lo
 use crate::engine::{Chat, Engine, Internal, PENDING_TIMEOUT, Reply, RtcKey, RtcTx};
 use crate::proto;
 use crate::rtc::{self, RtcCmd};
-use crate::signal::{Channel, ChannelId, Via};
+use crate::signal::{Channel, ChannelId, LinkId, Via};
 use crate::store::Contact;
 use crate::util::{b64u, from_b64u, now_ms, rng};
 
@@ -578,7 +578,7 @@ impl Engine {
             match env.kind {
                 kind::HERE => self.on_here(&key, &env),
                 kind::C1 if to_us => self.on_c1(&key, ch, &env, via),
-                kind::C2 if to_us => self.on_c2(ch, &env),
+                kind::C2 if to_us => self.on_c2(ch, &env, via),
                 kind::C3 if to_us => self.on_c3(ch, &env),
                 _ => {}
             }
@@ -602,7 +602,7 @@ impl Engine {
         {
             match env.kind {
                 kind::BUNDLE if to_us => self.on_bundle(&id, ch, &env),
-                kind::C2 if to_us => self.on_c2(ch, &env),
+                kind::C2 if to_us => self.on_c2(ch, &env, via),
                 _ => {}
             }
         }
@@ -746,7 +746,7 @@ impl Engine {
         }
     }
 
-    fn on_c2(&mut self, ch: ChannelId, env: &Envelope) {
+    fn on_c2(&mut self, ch: ChannelId, env: &Envelope, via: Via) {
         let Some(chat) = self.contacts.hs.iter().find_map(|(c, h)| match h {
             Hs::Initiating {
                 channel,
@@ -776,8 +776,8 @@ impl Engine {
         };
         let hello = proto::parse_hello(&payload).unwrap_or_default();
         let name = if hello.name.is_empty() { name } else { hello.name };
-        let local = self.rdv.local_peer(ch, &env.from);
-        match (hello.sdp, local) {
+        // Without an offer, the session runs on the nearby link this C2 came over.
+        match (hello.sdp, via.link()) {
             (None, Some(_)) => {
                 let (c3, est) = ready.write_c3(&hello_json(&self.name(), None));
                 self.rdv.send(channel, kind::C3, &c3, Some(to));
@@ -836,7 +836,6 @@ impl Engine {
     }
 
     fn on_c1(&mut self, key: &str, ch: ChannelId, env: &Envelope, via: Via) {
-        let _ = via;
         if self.busy(key) || self.connected(key) {
             return;
         }
@@ -868,7 +867,7 @@ impl Engine {
             .filter(|n| !n.is_empty())
             .unwrap_or(c.name);
         let chat = self.open_contact_chat(key, ChatKind::Contact { key: key.to_string() });
-        self.respond(chat, key.to_string(), env.from, ch, pending, bundle, name);
+        self.respond(chat, key.to_string(), env.from, ch, pending, bundle, name, via.link());
     }
 
     /// Responder side, once C1 (or an accepted request) was read.
@@ -882,9 +881,11 @@ impl Engine {
         pending: ContactResponderPending,
         bundle: Bundle,
         name: String,
+        local: Option<LinkId>,
     ) {
-        if self.rdv.local_peer(channel, &from).is_some() {
-            // A nearby link: no WebRTC.
+        // C1 came over a nearby link: no WebRTC. Only the link C1 itself used counts, since a
+        // peer heard on a link before may be someone nearby replaying its relayed envelopes.
+        if local.is_some() {
             match pending.write_c2(
                 &bundle.spk,
                 bundle.spk_epoch,
@@ -1373,7 +1374,7 @@ impl Engine {
         let key = format!("req:{}", r.id);
         let chat = self.open_contact_chat(&key, ChatKind::Stranger { id: r.id.clone() });
         let name = r.name.clone();
-        self.respond(chat, key, r.from, channel, r.pending, r.bundle, name);
+        self.respond(chat, key, r.from, channel, r.pending, r.bundle, name, None);
     }
 
     fn add_by_id(&mut self, input: &str) {

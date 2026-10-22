@@ -778,15 +778,15 @@ impl Engine {
     pub(crate) fn on_envelope(&mut self, ch: ChannelId, env: Envelope, via: Via) {
         if let Some(&(chat, tag)) = self.session_channels.get(&ch) {
             if env.kind == kind::SESSION {
-                self.on_frame(chat, &tag, &env.body);
+                self.on_frame(chat, &tag, &env.body, via.link());
             }
             return;
         }
         if let Some(&chat) = self.link_channels.get(&ch) {
             let to_us = env.to != BROADCAST;
             match env.kind {
-                kind::HS1 => self.on_hs1(chat, env.from, &env.body),
-                kind::HS2 if to_us => self.on_hs2(chat, env.from, &env.body),
+                kind::HS1 => self.on_hs1(chat, env.from, &env.body, via.link()),
+                kind::HS2 if to_us => self.on_hs2(chat, env.from, &env.body, via.link()),
                 kind::HS3 if to_us => self.on_hs3(chat, env.from, &env.body),
                 kind::TAKEN if to_us => {
                     let direct = self.chats.get(&chat).is_some_and(|c| !c.group && c.peers.is_empty());
@@ -805,8 +805,9 @@ impl Engine {
         c.link.as_ref().is_some_and(|l| l.creator) || !c.peers.is_empty()
     }
 
-    fn on_hs1(&mut self, chat: ChatId, from: PeerTag, hs1: &[u8]) {
-        let local = self.link_channel(chat).and_then(|ch| self.rdv.local_peer(ch, &from));
+    /// `local`: the nearby link this HS1 came over. Only then is the session kept off the
+    /// network: a peer merely heard on a link earlier may be someone replaying its envelopes.
+    fn on_hs1(&mut self, chat: ChatId, from: PeerTag, hs1: &[u8], local: Option<LinkId>) {
         let Some(c) = self.chats.get(&chat) else { return };
         let Some(l) = c.link.as_ref() else { return };
         if !Self::is_member(c) || l.answered.contains(&from) || c.peers.contains_key(&from) {
@@ -918,13 +919,15 @@ impl Engine {
         self.add_peer(chat, from, &est, a.name, a.rtc, ch, false);
     }
 
-    fn on_hs2(&mut self, chat: ChatId, from: PeerTag, hs2: &[u8]) {
+    fn on_hs2(&mut self, chat: ChatId, from: PeerTag, hs2: &[u8], via: Option<LinkId>) {
         let ch = self.link_channel(chat);
-        let local = ch.and_then(|ch| self.rdv.local_peer(ch, &from));
+        let local = via.or_else(|| ch.and_then(|ch| self.rdv.local_peer(ch, &from)));
         let Some(c) = self.chats.get(&chat) else { return };
         let Some(l) = c.link.as_ref() else { return };
+        // A one-to-one link answers one member: a second HS2 (someone else holding the link,
+        // racing the creator's) would add a hidden peer to the conversation.
         if l.answered.contains(&from)
-            || (!c.group && !c.peers.is_empty())
+            || (!c.group && (!c.peers.is_empty() || !l.joining.is_empty()))
             || c.peers.len() + l.joining.len() >= MAX_GROUP - 1
             || l.joining.len() >= MAX_PENDING
         {
@@ -1151,7 +1154,7 @@ impl Engine {
                 }
                 self.refresh_path(chat, &tag);
             }
-            RtcEvent::Frame(frame) => self.on_frame(chat, &tag, &frame),
+            RtcEvent::Frame(frame) => self.on_frame(chat, &tag, &frame, None),
             RtcEvent::Closed => {
                 if let Some(p) = self.chats.get_mut(&chat).and_then(|c| c.peers.get_mut(&tag)) {
                     p.rtc_open = false;
@@ -1211,13 +1214,26 @@ impl Engine {
         }
     }
 
-    fn on_frame(&mut self, chat: ChatId, tag: &PeerTag, frame: &[u8]) {
+    /// A session frame from `tag`, over the nearby link `via` or else the network.
+    fn on_frame(&mut self, chat: ChatId, tag: &PeerTag, frame: &[u8], via: Option<LinkId>) {
         let Some(p) = self.chats.get_mut(&chat).and_then(|c| c.peers.get_mut(tag)) else {
             return;
         };
         let Ok(opened) = p.session.open(frame, now_ms(), &mut rng()) else {
             return;
         };
+        // A peer on a nearby link sends there. Its frames coming another way mean the link we
+        // chose is not its own (someone nearby replayed its envelopes to draw our traffic): stop
+        // sending there.
+        if let Some(link) = p.local
+            && via != Some(link)
+        {
+            p.local = None;
+            if let Some(l) = self.links.get_mut(&link) {
+                l.peer = None;
+            }
+            self.refresh_path(chat, tag);
+        }
         for (l, f) in opened.replies {
             self.send_frame(chat, tag, l, f);
         }
@@ -1978,7 +1994,7 @@ impl Engine {
             }
             let peer = self.links.get(&link).and_then(|l| l.peer);
             match peer {
-                Some((chat, tag)) => self.on_frame(chat, &tag, &payload),
+                Some((chat, tag)) => self.on_frame(chat, &tag, &payload, Some(link)),
                 None => self.strike(link),
             }
         }
