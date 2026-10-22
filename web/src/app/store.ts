@@ -213,6 +213,12 @@ export async function appendHistory(key: string, entry: HistoryEntry): Promise<v
   await writeRecord("history", key, list.slice(-MAX_HISTORY));
 }
 
+export async function removeHistory(key: string, id: string): Promise<void> {
+  const list = await loadHistory(key);
+  const kept = list.filter((e) => e.id !== id);
+  if (kept.length !== list.length) await writeRecord("history", key, kept);
+}
+
 export async function clearHistory(key: string): Promise<void> {
   await deleteRecord("history", key);
 }

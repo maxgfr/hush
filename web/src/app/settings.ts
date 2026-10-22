@@ -59,9 +59,13 @@ export function saveSettings(next: Partial<Settings>): void {
   }
 }
 
-/** Test and dev overrides: `?relay=ws://…&tracker=…&nostun` (used by the e2e suite). */
+/**
+ * Test and dev overrides: `?relay=ws://…&tracker=…&nostun` (used by the e2e suite). Only on
+ * localhost: on the real site, a crafted link could otherwise send all of someone's signaling
+ * to one relay of the sender's choosing.
+ */
 function overrides(s: Settings): Settings {
-  if (typeof location === "undefined") return s;
+  if (typeof location === "undefined" || location.hostname !== "localhost") return s;
   const q = new URLSearchParams(location.search);
   const out = { ...s };
   const relays = q.getAll("relay");

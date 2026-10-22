@@ -17,7 +17,7 @@ beforeAll(async () => {
 describe("the Rust core from JavaScript", () => {
   test("a full link handshake, then the ratchet", () => {
     const fragment = core.linkNew(false, 60, false, Date.now());
-    expect(fragment).toMatch(/^1\.s\.[A-Za-z0-9_-]{43}\.[0-9a-z]+$/);
+    expect(fragment).toMatch(/^2\.s\.[A-Za-z0-9_-]{43}\.[0-9a-z]+$/);
     const creator = new core.LinkSecrets(fragment, undefined);
     const joiner = new core.LinkSecrets(`https://x/#${fragment}`, undefined);
     const j = joiner.joinerStart(new TextEncoder().encode("hi")) as {

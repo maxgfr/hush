@@ -58,7 +58,8 @@ export type CoreError =
   | "BadState"
   | "TooFarAhead"
   | "WeakProofOfWork"
-  | "InvalidParameter";
+  | "InvalidParameter"
+  | "Outdated";
 
 export function coreError(e: unknown): CoreError | null {
   const m = e instanceof Error ? e.message : String(e);

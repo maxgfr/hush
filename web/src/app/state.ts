@@ -1,6 +1,6 @@
 /** App-wide state: the current screen, the rendezvous, contacts, and starting conversations. */
 import { effect, signal } from "@preact/signals";
-import { linkInfo, loadCore } from "../core/wasm";
+import { coreError, linkInfo, loadCore } from "../core/wasm";
 import { Rendezvous } from "../net/rendezvous";
 import type { TransportStatus } from "../signal/types";
 import type { Chat, ChatStatus } from "./chat";
@@ -51,7 +51,8 @@ export function contactsManager(): Contacts {
 /** Reads (and immediately removes) a link from the address bar: it must not linger in history. */
 export function takeFragment(): string | null {
   const hash = location.hash.slice(1);
-  if (!hash.startsWith("1.")) return null;
+  // Any version: an old link must reach openLink to get its own message.
+  if (!/^\d+\./.test(hash)) return null;
   history.replaceState(null, "", location.pathname + location.search);
   return hash;
 }
@@ -113,8 +114,11 @@ export function openLink(input: string): void {
   let info: ReturnType<typeof linkInfo>;
   try {
     info = linkInfo(input);
-  } catch {
-    view.value = { name: "join", error: "invalidLink" };
+  } catch (e) {
+    view.value = {
+      name: "join",
+      error: coreError(e) === "Outdated" ? "outdatedLink" : "invalidLink",
+    };
     return;
   }
   if (info.expiresMs <= Date.now()) {

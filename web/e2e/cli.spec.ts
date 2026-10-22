@@ -48,7 +48,7 @@ test("hush new prints a link the web app opens", async () => {
   const p = run(["new", "--base", "https://maxgfr.github.io/hush/"]);
   expect(await p.exited).toBe(0);
   expect(p.out[0]).toMatch(
-    /^https:\/\/maxgfr\.github\.io\/hush\/#1\.s\.[A-Za-z0-9_-]{43}\.[0-9a-z]+$/,
+    /^https:\/\/maxgfr\.github\.io\/hush\/#2\.s\.[A-Za-z0-9_-]{43}\.[0-9a-z]+$/,
   );
 });
 
@@ -92,7 +92,7 @@ test("the CLI sends a file to a browser (SHA-256 checked)", async ({ browser }) 
   );
   writeFileSync(src, data);
   const cli = run(["send", src, "--name", "Terminal", ...NET]);
-  await expect.poll(() => cli.out[0] ?? "", { timeout: 15_000 }).toContain("#1.s.");
+  await expect.poll(() => cli.out[0] ?? "", { timeout: 15_000 }).toContain("#2.s.");
   const bob = await person(browser, "Bob");
   await bob.page.goto(cli.out[0] as string);
   await expect(bob.page.getByText("from-cli.bin")).toBeVisible({ timeout: 30_000 });

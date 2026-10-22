@@ -6,7 +6,7 @@ test("a one-to-one link: verify, chat, send a file, end", async ({ browser }) =>
   const bob = await person(browser, "Bob");
   await open(alice);
   const link = await createLink(alice);
-  expect(link).toMatch(/#1\.s\.[A-Za-z0-9_-]{43}\.[0-9a-z]+$/);
+  expect(link).toMatch(/#2\.s\.[A-Za-z0-9_-]{43}\.[0-9a-z]+$/);
 
   await bob.page.goto(link);
   // The link leaves the address bar as soon as it is read.

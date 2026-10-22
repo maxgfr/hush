@@ -62,6 +62,9 @@ export async function streamFile(file: Blob, id: string, peer: PeerConn): Promis
   }
 }
 
+/** Image types shown inline (never SVG: it can carry script). */
+export const PREVIEWABLE = /^image\/(png|jpeg|gif|webp|avif)$/;
+
 /** Collects the chunks of a download and verifies the result. */
 export class Download {
   private readonly parts: Uint8Array[] = [];
@@ -89,7 +92,10 @@ export class Download {
       this.fail();
       return true;
     }
-    const blob = new Blob(this.parts as BlobPart[], { type: this.item.mime });
+    // Only images the app previews keep the sender's type: anything else (HTML, SVG…) opened
+    // from its blob URL would render as a document of this origin.
+    const type = PREVIEWABLE.test(this.item.mime) ? this.item.mime : "application/octet-stream";
+    const blob = new Blob(this.parts as BlobPart[], { type });
     this.parts.length = 0;
     this.item.url.value = URL.createObjectURL(blob);
     this.item.state.value = "done";

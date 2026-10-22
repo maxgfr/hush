@@ -45,7 +45,7 @@ export function Join(props: { error?: string }): JSX.Element {
               value={value}
               spellcheck={false}
               autocomplete="off"
-              placeholder="https://maxgfr.github.io/hush/#1.s.…"
+              placeholder="https://maxgfr.github.io/hush/#2.s.…"
               onInput={(e) => setValue((e.target as HTMLTextAreaElement).value)}
             />
           </label>

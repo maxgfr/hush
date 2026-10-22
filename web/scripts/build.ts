@@ -153,6 +153,15 @@ export async function build(opts: BuildOptions = {}): Promise<BuildResult> {
     hash.update(await readFile(join(outdir, f)));
   }
   const version = hash.digest("hex").slice(0, 16);
+  // What the worker checks before serving a cached file ("./" is the shell, index.html).
+  const integrity: Record<string, string> = {};
+  for (const f of files) {
+    const digest = createHash("sha256")
+      .update(await readFile(join(outdir, f)))
+      .digest("base64");
+    integrity[`./${f}`] = digest;
+    if (f === "index.html") integrity["./"] = digest;
+  }
   const sw = await Bun.build({
     entrypoints: [join(ROOT, "src/sw.ts")],
     outdir,
@@ -163,6 +172,7 @@ export async function build(opts: BuildOptions = {}): Promise<BuildResult> {
     define: {
       __SW_VERSION__: JSON.stringify(version),
       __PRECACHE__: JSON.stringify(["./", ...files.map((f) => `./${f}`)]),
+      __INTEGRITY__: JSON.stringify(integrity),
     },
   });
   assertOk(sw, "service worker build");

@@ -19,6 +19,7 @@ import {
   fileOffer,
   hashFile,
   newFileItem,
+  PREVIEWABLE,
   streamFile,
 } from "./files";
 import { PeerConn } from "./peer";
@@ -58,6 +59,8 @@ export interface ChatHooks {
   onCard?(chat: Chat, peer: PeerConn, card: Uint8Array): void;
   /** A text message was shown (contacts.ts keeps history when asked to). */
   onText?(chat: Chat, item: ChatItem): void;
+  /** A message was deleted, by us or by its sender (kept history must forget it too). */
+  onDelete?(chat: Chat, id: string): void;
 }
 
 export interface Pending {
@@ -147,7 +150,7 @@ export abstract class Chat {
           }
         },
       },
-      name,
+      this.uniqueName(name, null),
     );
     pending.bind(peer);
     batch(() => {
@@ -203,17 +206,28 @@ export abstract class Chat {
 
   private onCtrl(peer: PeerConn, m: CtrlMessage): void {
     switch (m.t) {
-      case "name":
-        peer.name.value = m.name;
+      case "name": {
+        const prev = peer.name.value;
+        const next = this.uniqueName(m.name, peer);
+        if (next === prev) break;
+        peer.name.value = next;
+        // Past messages keep the name they were sent under (only unnamed ones get it), and a
+        // change is announced: a member cannot pass for another one after the fact.
         this.items.value = this.items.value.map((i) =>
-          i.from === peer ? { ...i, author: m.name } : i,
+          i.from === peer && !i.author ? { ...i, author: next } : i,
         );
+        if (prev) this.notice(t("renamed", { old: prev, name: next }));
         break;
+      }
       case "verified":
         peer.verifiedByPeer.value = true;
         break;
       case "lock":
+        if (m.locked === this.locked.value) break;
         this.locked.value = m.locked;
+        this.notice(
+          t(m.locked ? "lockedBy" : "unlockedBy", { name: peer.name.value || t("someone") }),
+        );
         break;
       case "card":
         try {
@@ -243,7 +257,10 @@ export abstract class Chat {
         break;
       }
       case "del":
-        this.items.value = this.items.value.filter((i) => !(i.id === m.id && i.from === peer));
+        if (this.items.value.some((i) => i.id === m.id && i.from === peer)) {
+          this.items.value = this.items.value.filter((i) => !(i.id === m.id && i.from === peer));
+          this.hooks.onDelete?.(this, m.id);
+        }
         break;
       case "file": {
         const item = newFileItem(m, peer);
@@ -256,7 +273,14 @@ export abstract class Chat {
           ...(m.ttl ? { expiresAt: now + m.ttl * 1000 } : {}),
         });
         this.unread.value++;
-        if (m.mime.startsWith("image/") && m.size <= AUTO_DOWNLOAD && peer.rtc?.isOpen)
+        // Small images come by themselves, but only from a verified peer and a few at a time.
+        if (
+          PREVIEWABLE.test(m.mime) &&
+          m.size <= AUTO_DOWNLOAD &&
+          peer.rtc?.isOpen &&
+          peer.isVerified &&
+          this.downloads.size < 3
+        )
           this.download(item);
         break;
       }
@@ -269,6 +293,18 @@ export abstract class Chat {
         this.downloads.get(`${toHex(peer.tag)}/${m.id}`)?.fail();
         break;
     }
+  }
+
+  /** A peer's name, made distinct from every other member's (and ours) in a group. */
+  private uniqueName(name: string, peer: PeerConn | null): string {
+    if (!this.group || !name) return name;
+    const taken = new Set(
+      [this.myName(), ...this.peers.value.filter((p) => p !== peer).map((p) => p.name.value)].map(
+        (n) => n.toLowerCase(),
+      ),
+    );
+    if (!taken.has(name.toLowerCase())) return name;
+    for (let n = 2; ; n++) if (!taken.has(`${name} (${n})`.toLowerCase())) return `${name} (${n})`;
   }
 
   protected push(item: ChatItem): void {
@@ -388,6 +424,7 @@ export abstract class Chat {
   /** Deletes one of our messages on every side. */
   async retract(id: string): Promise<void> {
     this.items.value = this.items.value.filter((i) => !(i.id === id && i.from === null));
+    this.hooks.onDelete?.(this, id);
     const data = encodeJson({ t: "del", id });
     await Promise.all(this.live().map((p) => p.send(Lane.CHAT, data).catch(() => {})));
   }

@@ -10,7 +10,7 @@ test("a group link: three people, everyone sees everyone, locking keeps others o
   const dave = await person(browser, "Dave");
   await open(alice);
   const link = await createLink(alice, { group: true });
-  expect(link).toContain("#1.g.");
+  expect(link).toContain("#2.g.");
   await bob.page.goto(link);
   await expect(bob.page.getByRole("heading", { name: "2 people" })).toBeVisible();
   await carol.page.goto(link);

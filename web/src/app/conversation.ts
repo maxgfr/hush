@@ -34,6 +34,9 @@ export type { ChatItem, ChatStatus } from "./chat";
 const RESEND_MS = 6000;
 const GROUP_RESENDS = 5;
 export const MAX_GROUP = 16;
+/** Handshakes in flight at once, and how long one may wait for its last message. */
+const MAX_PENDING = 4;
+const PENDING_MS = 45_000;
 
 export class Conversation extends Chat {
   readonly group: boolean;
@@ -49,6 +52,8 @@ export class Conversation extends Chat {
     { state: LinkCreator; name: string; rtc: Pending }
   >();
   private readonly answered = new Set<string>();
+  /** HS2s we are answering (each opens a connection). */
+  private joining = 0;
 
   private constructor(
     readonly fragment: string,
@@ -154,7 +159,10 @@ export class Conversation extends Chat {
   private async onHs1(env: OpenedEnvelope, from: string): Promise<void> {
     if (!this.isMember() || this.answered.has(from) || this.hasPeer(env.from)) return;
     const full = this.group
-      ? this.locked.value || this.peers.value.length >= MAX_GROUP - 1
+      ? this.locked.value ||
+        this.peers.value.length >= MAX_GROUP - 1 ||
+        // Someone holding the link could otherwise open connections without end.
+        this.creating.size + this.awaitingHs3.size >= MAX_PENDING
       : this.peers.value.length > 0 || this.awaitingHs3.size > 0 || this.creating.size > 0;
     if (full) {
       // A one-to-one link is taken: say so, so a late recipient learns the link leaked.
@@ -187,7 +195,15 @@ export class Conversation extends Chat {
       pending.rtc.close();
       return;
     }
-    this.awaitingHs3.set(from, { state: hs2.state, name: hello?.name ?? "", rtc: pending });
+    const waiting = { state: hs2.state, name: hello?.name ?? "", rtc: pending };
+    this.awaitingHs3.set(from, waiting);
+    this.timers.push(
+      setTimeout(() => {
+        if (this.awaitingHs3.get(from) !== waiting) return;
+        this.awaitingHs3.delete(from);
+        pending.rtc.close();
+      }, PENDING_MS),
+    );
     this.rendezvous.send(this.channel, Kind.HS2, hs2.hs2, { to: env.from });
   }
 
@@ -211,6 +227,8 @@ export class Conversation extends Chat {
   private async onHs2(env: OpenedEnvelope, from: string): Promise<void> {
     if (!this.joiner || this.answered.has(from)) return;
     if (!this.group && this.peers.value.length > 0) return;
+    if (this.peers.value.length + this.joining >= MAX_GROUP - 1 || this.joining >= MAX_PENDING)
+      return;
     let read: { state: LinkJoinerReady; payload: Uint8Array };
     try {
       read = this.joiner.readHs2(env.body) as typeof read;
@@ -223,11 +241,14 @@ export class Conversation extends Chat {
     if (this.status.value === "waiting") this.status.value = "connecting";
     const pending = this.newRtc();
     let answer: string;
+    this.joining++;
     try {
       answer = await pending.rtc.acceptOffer(hello.sdp);
     } catch {
       pending.rtc.close();
       return;
+    } finally {
+      this.joining--;
     }
     const res = read.state.writeHs3(
       encodeJson({ v: 1, sdp: answer }),

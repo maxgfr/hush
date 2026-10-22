@@ -75,9 +75,7 @@ function Message(props: { chat: Chat; item: ChatItem }): JSX.Element {
   const mine = item.from === null;
   return (
     <li class={mine ? "msg mine" : "msg"} data-testid="message">
-      {props.chat.group && !mine && (
-        <span class="author">{item.from?.name.value || t("someone")}</span>
-      )}
+      {props.chat.group && !mine && <span class="author">{item.author || t("someone")}</span>}
       <div class="bubble">
         {item.file ? (
           <FileCard chat={props.chat} file={item.file} />

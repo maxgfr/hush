@@ -11,7 +11,7 @@
  *   identifier with our bundle, and show incoming requests (each carrying a
  *   proof of work) until the user accepts or declines.
  */
-import { signal } from "@preact/signals";
+import { effect, signal } from "@preact/signals";
 import {
   type BundleInfo,
   type Channel,
@@ -41,6 +41,7 @@ import {
   identity,
   isUnlocked,
   loadHistory,
+  removeHistory,
   saveContact,
 } from "./store";
 
@@ -119,6 +120,9 @@ export class Contacts {
   private readonly listening = new Map<string, { channel: Channel; off: () => void }>();
   private readonly handshaking = new Map<string, number>();
   private readonly savingFor = new WeakSet<PeerConn>();
+  /** Peers whose card arrived before the emojis were compared. */
+  private readonly heldCards = new WeakSet<PeerConn>();
+  private lastLookupReply = 0;
   private readonly received = new WeakMap<PeerConn, BundleInfo>();
   private readonly secrets = new WeakMap<PeerConn, Uint8Array>();
   private reach: { channel: Channel; off: () => void } | null = null;
@@ -137,15 +141,21 @@ export class Contacts {
   readonly hooks: ChatHooks = {
     onCard: (chat, peer, card) => this.onCard(chat, peer, card),
     onText: (chat, item) => {
-      if (!(chat instanceof ContactChat) || !chat.contact?.history || item.from === undefined)
-        return;
-      void appendHistory(chat.contact.key, {
+      // Disappearing messages are never written down; the setting is read now, not when the
+      // chat started (it may have been turned off since).
+      if (!(chat instanceof ContactChat) || item.from === undefined || item.expiresAt) return;
+      const key = chat.contact?.key;
+      if (!key || !contacts.value.find((c) => c.key === key)?.history) return;
+      void appendHistory(key, {
         id: item.id,
         mine: item.from === null,
         ts: item.ts,
         text: item.text ?? "",
-        ...(item.expiresAt ? { expiresAt: item.expiresAt } : {}),
       }).catch(() => {});
+    },
+    onDelete: (chat, id) => {
+      const key = chat instanceof ContactChat ? chat.contact?.key : undefined;
+      if (key) void removeHistory(key, id).catch(() => {});
     },
   };
 
@@ -154,6 +164,8 @@ export class Contacts {
 
   /** "Save contact" on a verified peer: sends our card; saved once theirs arrives. */
   async offerCard(chat: Chat, peer: PeerConn): Promise<"saved" | "waiting" | "gone"> {
+    // A card binds an identity to this session: only once both sides compared the emojis.
+    if (!peer.isVerified) return "gone";
     // Read the session's contact secret now: the other side may end the session at any time.
     if (!this.capture(peer)) return "gone";
     this.savingFor.add(peer);
@@ -196,12 +208,36 @@ export class Contacts {
       // A known contact refreshing its bundle (new prekey, new name).
       const c = chat.contact ?? contacts.value.find((x) => x.key === hex(info.idHash));
       if (c && c.key === hex(info.idHash) && this.me()) {
-        void saveContact({ ...c, bundle: toB64u(info.bytes), name: info.name || c.name });
+        // The name stays the one saved: a contact cannot rename itself in your book.
+        // Start from the saved record, not this chat's copy: its settings may have changed since.
+        const current = contacts.value.find((x) => x.key === c.key) ?? c;
+        void saveContact({
+          ...current,
+          bundle: toB64u(info.bytes),
+          name: current.name || info.name,
+        });
       } else if (!c && this.me()) {
         void this.store(peer, info, chat);
       }
       return;
     }
+    if (!peer.isVerified) {
+      // Before the emojis match, the card could come from someone in the middle: hold it.
+      if (!this.heldCards.has(peer)) {
+        this.heldCards.add(peer);
+        const stop = effect(() => {
+          if (!(peer.verifiedByMe.value && peer.verifiedByPeer.value)) return;
+          queueMicrotask(() => stop());
+          const held = this.received.get(peer);
+          if (held) this.onVerifiedCard(chat, peer, held);
+        });
+      }
+      return;
+    }
+    this.onVerifiedCard(chat, peer, info);
+  }
+
+  private onVerifiedCard(chat: Chat, peer: PeerConn, info: BundleInfo): void {
     if (this.savingFor.has(peer)) {
       void this.store(peer, info, chat);
     } else {
@@ -226,7 +262,7 @@ export class Contacts {
 
   private async store(peer: PeerConn, info: BundleInfo, chat?: Chat): Promise<void> {
     const secret = this.secrets.get(peer);
-    if (!this.me() || !secret) return;
+    if (!this.me() || !secret || !peer.isVerified) return;
     const key = hex(info.idHash);
     const existing = contacts.value.find((c) => c.key === key);
     await saveContact({
@@ -580,6 +616,10 @@ export class Contacts {
     const me = this.me();
     if (!me) return;
     if (env.kind === Kind.LOOKUP) {
+      // Each answer costs a hybrid signature: at most one a second, whatever arrives.
+      const now = Date.now();
+      if (now - this.lastLookupReply < 1000) return;
+      this.lastLookupReply = now;
       this.rendezvous.send(channel, Kind.BUNDLE, me.bundle(this.myName(), Date.now()), {
         to: env.from,
       });
@@ -645,6 +685,12 @@ export class Contacts {
       },
     };
     this.requests.value = [...this.requests.value, request];
+    // The requester stops waiting after REQUEST_WAIT_MS: so does the request (and its slot).
+    setTimeout(() => {
+      if (!this.requests.value.includes(request)) return;
+      this.requests.value = this.requests.value.filter((r) => r !== request);
+      read.state.free();
+    }, REQUEST_WAIT_MS);
   }
 
   /** Looks up an identifier and sends a contact request; resolves with the chat once accepted. */

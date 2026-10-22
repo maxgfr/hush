@@ -4,6 +4,8 @@
  * Rendezvous layer on top (../net/rendezvous.ts) seals and opens envelopes
  * with the core and follows the daily topic rotation.
  */
+import { sha256 } from "@noble/hashes/sha2.js";
+import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
 import { ManualTransport } from "./manual";
 import { DEFAULT_RELAYS, NostrTransport } from "./nostr";
 import { DEFAULT_TRACKERS, TorrentTransport } from "./torrent";
@@ -85,8 +87,9 @@ export class SignalMux {
   }
 
   private deliver(wire: string, topic: Uint8Array, via: TransportName): void {
-    // The sealed part starts with a random nonce, so its prefix identifies the envelope.
-    const key = `${topic[0]}:${topic[1]}:${wire.slice(0, 60)}`;
+    // The whole envelope, hashed: keyed on a prefix, a relay could send a corrupted copy first
+    // and get the genuine one dropped as a duplicate.
+    const key = `${topic[0]}:${topic[1]}:${bytesToHex(sha256(utf8ToBytes(wire)).subarray(0, 16))}`;
     const now = Date.now();
     if (this.seen.has(key)) return;
     this.seen.set(key, now);

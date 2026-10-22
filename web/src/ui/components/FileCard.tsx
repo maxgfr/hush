@@ -1,6 +1,6 @@
 import type { JSX } from "preact";
 import type { Chat } from "../../app/chat";
-import type { FileItem } from "../../app/files";
+import { type FileItem, PREVIEWABLE } from "../../app/files";
 import { t } from "../i18n";
 import { Icon } from "./Icons";
 
@@ -15,8 +15,7 @@ export function FileCard(props: { chat: Chat; file: FileItem }): JSX.Element {
   const f = props.file;
   const state = f.state.value;
   const url = f.url.value;
-  const image =
-    f.mime.startsWith("image/") && url && /^image\/(png|jpeg|gif|webp|avif)$/.test(f.mime);
+  const image = f.mime.startsWith("image/") && url && PREVIEWABLE.test(f.mime);
   return (
     <div class="file-card">
       {image && <img src={url} alt={f.name} class="file-preview" />}
