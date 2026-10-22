@@ -32,6 +32,7 @@ pub mod pad;
 pub mod pow;
 pub mod sas;
 pub mod session;
+pub mod stream;
 pub mod vault;
 
 pub use error::{Error, Result};

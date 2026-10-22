@@ -1,0 +1,28 @@
+[package]
+name = "hush-ffi"
+description = "UniFFI bindings of hush-core for the future Android (Kotlin) and iOS (Swift) apps"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "staticlib", "lib"]
+name = "hush_ffi"
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+required-features = ["cli"]
+
+[features]
+cli = ["uniffi/cli"]
+
+[dependencies]
+hush-core = { path = "../hush-core" }
+uniffi = "=0.32.2"
+getrandom = { version = "=0.4.3", features = ["sys_rng"] }
+rand_core = "=0.10.1"
+thiserror = "2"
