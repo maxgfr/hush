@@ -1,13 +1,12 @@
 /** Offline signaling: show our latest handshake code as a QR, scan or paste theirs. */
 import type { JSX } from "preact";
 import { useState } from "preact/hooks";
-import { manualCodes, rendezvous } from "../../app/state";
+import { manualCodes, manualOpen, rendezvous } from "../../app/state";
 import { t } from "../i18n";
 import { QrCode } from "./QrCode";
 import { QrScanner } from "./QrScanner";
 
 export function ManualPanel(): JSX.Element {
-  const [open, setOpen] = useState(false);
   const [scan, setScan] = useState(false);
   const [paste, setPaste] = useState("");
   const [error, setError] = useState(false);
@@ -17,12 +16,12 @@ export function ManualPanel(): JSX.Element {
     setError(!ok);
     if (ok) setPaste("");
   };
-  if (!open) {
+  if (!manualOpen.value) {
     return (
       <button
         type="button"
         class="btn btn-ghost btn-small manual-toggle"
-        onClick={() => setOpen(true)}
+        onClick={() => (manualOpen.value = true)}
       >
         {t("offline")}
       </button>

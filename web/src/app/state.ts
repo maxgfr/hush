@@ -29,6 +29,8 @@ export function go(v: View): void {
 export const ready = signal(false);
 export const bootError = signal<string | null>(null);
 export const manualCodes = signal<string[]>([]);
+/** The offline (QR) panel is open: it stays up until the direct link opens. */
+export const manualOpen = signal(false);
 export const transports = signal<TransportStatus[]>([]);
 
 let rdv: Rendezvous | null = null;

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { close, createLink, open, person, say, sas } from "./helpers";
+import { close, createLink, open, person, sas, say } from "./helpers";
 
 test("a one-to-one link: verify, chat, send a file, end", async ({ browser }) => {
   const alice = await person(browser, "Alice");
@@ -38,7 +38,9 @@ test("a one-to-one link: verify, chat, send a file, end", async ({ browser }) =>
 
   await alice.page.getByTestId("end").click();
   await expect(alice.page.getByRole("heading", { name: "Conversation ended" })).toBeVisible();
-  await expect(bob.page.getByRole("heading", { name: "The other person ended the conversation" })).toBeVisible();
+  await expect(
+    bob.page.getByRole("heading", { name: "The other person ended the conversation" }),
+  ).toBeVisible();
   await close(alice, bob);
 });
 
@@ -61,7 +63,9 @@ test("a passphrase protects the link", async ({ browser }) => {
   await open(alice);
   const link = await createLink(alice, { passphrase: "correct horse battery" });
   await bob.page.goto(link);
-  await expect(bob.page.getByRole("heading", { name: "This link is protected by a passphrase" })).toBeVisible();
+  await expect(
+    bob.page.getByRole("heading", { name: "This link is protected by a passphrase" }),
+  ).toBeVisible();
   await bob.page.getByLabel("Passphrase").fill("correct horse battery");
   await bob.page.getByRole("button", { name: "Join" }).click();
   expect(await sas(bob)).toBe(await sas(alice));

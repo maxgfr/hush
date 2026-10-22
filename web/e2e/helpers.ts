@@ -24,7 +24,11 @@ export interface Person {
   errors: string[];
 }
 
-export async function person(browser: Browser, name: string, extra: Record<string, unknown> = {}): Promise<Person> {
+export async function person(
+  browser: Browser,
+  name: string,
+  extra: Record<string, unknown> = {},
+): Promise<Person> {
   const ctx = await browser.newContext({ acceptDownloads: true, locale: "en-US" });
   await ctx.addInitScript(
     ({ s }) => {
@@ -50,7 +54,10 @@ export async function open(p: Person, hash = ""): Promise<void> {
 }
 
 /** Creates a link from the home screen and returns it. */
-export async function createLink(p: Person, opts: { group?: boolean; passphrase?: string } = {}): Promise<string> {
+export async function createLink(
+  p: Person,
+  opts: { group?: boolean; passphrase?: string } = {},
+): Promise<string> {
   await p.page.getByRole("button", { name: "New conversation" }).click();
   if (opts.group) await p.page.getByText("Group", { exact: true }).click();
   if (opts.passphrase) await p.page.getByLabel("Passphrase (optional)").fill(opts.passphrase);

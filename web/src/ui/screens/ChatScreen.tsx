@@ -4,7 +4,7 @@ import type { Chat, ChatItem } from "../../app/chat";
 import { ContactChat } from "../../app/contacts";
 import { Conversation } from "../../app/conversation";
 import type { PeerConn } from "../../app/peer";
-import { contactsManager, go, view } from "../../app/state";
+import { contactsManager, go, manualOpen, view } from "../../app/state";
 import { vaultState } from "../../app/store";
 import { FileCard } from "../components/FileCard";
 import { Icon } from "../components/Icons";
@@ -357,6 +357,10 @@ export function ChatScreen(props: { chat: Chat }): JSX.Element {
             group
             passphrase={conv.fragment.endsWith(".p")}
           />
+        )}
+        {open && manualOpen.value && peers.some((p) => p.state.value === "connecting") && (
+          // The other side may still need our last code (HS3) before its link can open.
+          <ManualPanel />
         )}
         {chat.locked.value && <p class="notice">{t("locked")}</p>}
         {peers.map((p) => (

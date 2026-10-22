@@ -33,6 +33,10 @@ export interface RendezvousOptions {
 }
 
 const DAY_MS = 86_400_000;
+const EVERYWHERE: readonly TransportName[] = ["nostr", "torrent", "manual"];
+const NETWORK: readonly TransportName[] = ["nostr", "torrent"];
+/** What can sensibly be carried by hand: the three link-handshake messages. */
+const BY_HAND = new Set<number>([Kind.HS1, Kind.HS2, Kind.HS3]);
 
 export class Rendezvous {
   /** Our random tag for this app session: the `from` of everything we send. Never an identity. */
@@ -81,7 +85,8 @@ export class Rendezvous {
     const now = this.now();
     const topic = channel.topic(hush().utcDay(now));
     const sealed = channel.seal(topic, this.tag, opts.to ?? new Uint8Array(0), kind, body, now);
-    this.mux.send(topic, toB64u(sealed), opts.via ? { via: opts.via } : {});
+    // Link handshakes also become manual codes, shown if the user opens the offline panel.
+    this.mux.send(topic, toB64u(sealed), { via: opts.via ?? (BY_HAND.has(kind) ? EVERYWHERE : NETWORK) });
   }
 
   /** Feeds a scanned or pasted manual code; false when it is not one. */
@@ -153,7 +158,12 @@ export class Rendezvous {
     } catch {
       return;
     }
+    // Several listeners may share one channel (e.g. a waiter for one reply): open once per
+    // channel (the replay guard would refuse a second open) and deliver to all of them.
+    const tried = new Set<Channel>();
     for (const sub of subs) {
+      if (tried.has(sub.channel)) continue;
+      tried.add(sub.channel);
       let env: OpenedEnvelope;
       try {
         env = openEnvelope(sub.channel, topic, data, this.now(), via === "manual");
@@ -162,7 +172,7 @@ export class Rendezvous {
       }
       if (equalBytes(env.from, this.tag)) return;
       if (env.to && !equalBytes(env.to, this.tag)) return;
-      sub.listener(env, via);
+      for (const s of [...subs]) if (s.channel === sub.channel) s.listener(env, via);
       return;
     }
   }

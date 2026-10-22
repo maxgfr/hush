@@ -23,7 +23,11 @@ export default defineConfig({
   projects: [
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
     // Playwright's Linux WebKit cannot open WebRTC connections: CI runs this project on macOS.
-    { name: "webkit", use: { ...devices["Desktop Safari"] }, testMatch: /(direct|manual)\.spec\.ts/ },
+    {
+      name: "webkit",
+      use: { ...devices["Desktop Safari"] },
+      testMatch: /(direct|manual)\.spec\.ts/,
+    },
     { name: "mobile", use: { ...devices["Pixel 7"] }, testMatch: /layout\.spec\.ts/ },
   ],
 });
