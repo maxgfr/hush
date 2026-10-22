@@ -38,9 +38,10 @@ impl KdfParams {
     };
 
     fn validate(self) -> Result<Self> {
-        // Refuse costs a crafted backup could use to exhaust memory or time; Argon2 itself rejects
-        // costs below its minimums.
-        if self.m_kib > 1024 * 1024 || self.t == 0 || self.t > 16 || self.p == 0 || self.p > 8 {
+        // Refuse costs a crafted backup could use to exhaust memory or time (a phone is killed
+        // well before 1 GiB): at most 4 times the default memory, and 8 passes. Argon2 itself
+        // rejects costs below its minimums.
+        if self.m_kib > 256 * 1024 || self.t == 0 || self.t > 8 || self.p == 0 || self.p > 8 {
             return Err(Error::InvalidParameter);
         }
         Ok(self)
@@ -226,5 +227,20 @@ pub(crate) mod tests {
         let mut bad = header.clone();
         bad[8] ^= 1; // tamper with the costs
         assert!(Vault::unlock("passphrase", &bad).is_err());
+    }
+
+    #[test]
+    fn costs_a_phone_cannot_pay_are_refused() {
+        assert!(KdfParams::DEFAULT.validate().is_ok());
+        let big = KdfParams {
+            m_kib: 256 * 1024 + 1,
+            ..KdfParams::DEFAULT
+        };
+        assert!(big.validate().is_err());
+        let slow = KdfParams {
+            t: 9,
+            ..KdfParams::DEFAULT
+        };
+        assert!(slow.validate().is_err());
     }
 }
