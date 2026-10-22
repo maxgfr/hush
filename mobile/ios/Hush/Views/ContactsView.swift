@@ -232,6 +232,7 @@ struct BackupFile: FileDocument {
 struct BackupSection: View {
     @Environment(HushStore.self) private var store
     @State private var passphrase = ""
+    @State private var confirm = ""
     @State private var busy = false
     @State private var message: (ok: Bool, text: String)?
     @State private var exported: BackupFile?
@@ -241,7 +242,13 @@ struct BackupSection: View {
         Section {
             Text("backupIntro").font(.footnote).foregroundStyle(.secondary)
             SecureField("backupPassword", text: $passphrase)
+            // The file can be copied anywhere and attacked offline: as long a passphrase as the vault's.
+            SecureField("vaultPasswordConfirm", text: $confirm)
             Button {
+                if let problem = VaultModel.problem(passphrase, confirm: confirm) {
+                    message = (false, problem)
+                    return
+                }
                 run {
                     exported = BackupFile(data: try await store.exportBackup(passphrase))
                 }
@@ -254,6 +261,8 @@ struct BackupSection: View {
             }
         } header: {
             Text("backup")
+        } footer: {
+            Text("backupPasswordHint")
         }
         .fileExporter(
             isPresented: Binding(get: { exported != nil }, set: { if !$0 { exported = nil } }),

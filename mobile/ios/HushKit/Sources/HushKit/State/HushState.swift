@@ -28,6 +28,14 @@ public struct FileModel: Equatable, Sendable {
         /// Ours, received intact by someone.
         case delivered
         case failed(reason: String)
+
+        /// Theirs, still coming.
+        var theirs: Bool {
+            switch self {
+            case .offered, .receiving: true
+            default: false
+            }
+        }
     }
 
     public let id: String
@@ -169,7 +177,8 @@ public struct HushState: Equatable, Sendable {
             let item = ChatItem(id: id, peer: peer, author: author, ts: ts, expiresAt: expiresAt, body: .text(text), mine: peer == nil)
             add(item, to: chat, past: past)
         case let .messageDeleted(chat, id):
-            update(chat) { $0.items.removeAll { $0.id == id } }
+            // Notices are ours alone: no one deletes them.
+            update(chat) { $0.items.removeAll { $0.id == id && !$0.isNotice } }
         case let .fileOffered(chat, peer, id, name, size, mime, expiresAt):
             let file = FileModel(id: id, name: name, size: size, mime: mime, state: peer == nil ? .sent : .offered)
             let author = peer.flatMap { chats[chat]?.peer($0)?.name } ?? ""
@@ -177,21 +186,27 @@ public struct HushState: Equatable, Sendable {
             add(ChatItem(id: id, peer: peer, author: author, ts: ts, expiresAt: expiresAt, body: .file(file), mine: peer == nil), to: chat, past: false)
         case let .fileProgress(chat, id, done, total):
             updateFile(chat, id) { f in
-                // Ours too, when we send it: only theirs show progress.
-                if case .sent = f.state { return }
-                if case .delivered = f.state { return }
+                // Ours too, when we send it: only theirs show progress, until saved.
+                guard f.state.theirs else { return }
                 f.state = .receiving(done: done, total: total)
             }
         case let .fileSaved(chat, id, path):
-            updateFile(chat, id) { $0.state = .saved(path: path) }
+            // Once: a second file under the same id never takes the first one's place.
+            updateFile(chat, id) { f in
+                guard f.state.theirs else { return }
+                f.state = .saved(path: path)
+            }
         case let .fileFailed(chat, id, reason):
             updateFile(chat, id) { $0.state = .failed(reason: reason) }
         case let .fileDelivered(chat, id, _):
-            updateFile(chat, id) { $0.state = .delivered }
+            updateFile(chat, id) { f in
+                guard f.state == .sent || f.state == .delivered else { return }
+                f.state = .delivered
+            }
         case let .notice(chat, notice):
-            let n = (chats[chat]?.items.count ?? 0)
+            // An id no one can guess, so a message cannot take it first.
             let ts = UInt64(Date().timeIntervalSince1970 * 1000)
-            add(ChatItem(id: "notice-\(n)-\(ts)", peer: nil, author: "", ts: ts, expiresAt: nil, body: .notice(notice), mine: false), to: chat, past: false)
+            add(ChatItem(id: "notice-\(UUID().uuidString)", peer: nil, author: "", ts: ts, expiresAt: nil, body: .notice(notice), mine: false), to: chat, past: false)
         case let .cardOffer(chat, peer, name, id):
             update(chat) { c in
                 c.offers.removeAll { $0.peer == peer }
@@ -266,6 +281,7 @@ public struct HushState: Equatable, Sendable {
     private mutating func add(_ item: ChatItem, to chat: UInt64, past: Bool) {
         let unseen = visible != chat
         update(chat) { c in
+            // An id already shown keeps what it shows: a repeat, or someone reusing it, is dropped.
             guard !c.items.contains(where: { $0.id == item.id }) else { return }
             if past {
                 // History restored from the vault: in time order, before what is new.

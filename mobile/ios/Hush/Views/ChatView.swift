@@ -319,7 +319,8 @@ struct MessageRow: View {
         case let .notice(n):
             NoticeRow(text: Wording.notice(n))
         case let .text(text):
-            bubble { Text(verbatim: text).textSelection(.enabled) }
+            // No text selection: its Copy would sync and never expire. The menu's Copy does neither.
+            bubble { Text(verbatim: text) }
                 .contextMenu {
                     Button {
                         Clipboard.copy(text)
@@ -375,10 +376,17 @@ struct FileCard: View {
     let file: FileModel
     @Environment(HushStore.self) private var store
     @State private var preview: URL?
+    @State private var image: Image?
+    @State private var previewable = false
+
+    private var savedPath: String? {
+        if case let .saved(path) = file.state { return path }
+        return nil
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if case let .saved(path) = file.state, file.mime.hasPrefix("image/"), let image = Platform.image(at: path) {
+            if let image {
                 image.resizable().scaledToFit().frame(maxWidth: 240, maxHeight: 240).clipShape(RoundedRectangle(cornerRadius: 8))
             }
             HStack {
@@ -402,7 +410,9 @@ struct FileCard: View {
             case let .saved(path):
                 let url = URL(fileURLWithPath: path)
                 HStack {
-                    Button { preview = url } label: { Label("open", systemImage: "eye") }
+                    if previewable {
+                        Button { preview = url } label: { Label("open", systemImage: "eye") }
+                    }
                     ShareLink(item: url) { Label("share", systemImage: "square.and.arrow.up") }
                 }
                 .buttonStyle(.bordered)
@@ -416,6 +426,14 @@ struct FileCard: View {
             }
         }
         .quickLookPreview($preview)
+        .task(id: savedPath) {
+            // Their file: its type and size are checked before anything decodes it.
+            guard let savedPath else {
+                (image, previewable) = (nil, false)
+                return
+            }
+            (image, previewable) = await Platform.look(at: savedPath, mime: file.mime)
+        }
     }
 }
 
@@ -440,6 +458,8 @@ struct Composer: View {
             .accessibilityLabel(Text("attach"))
             TextField("messagePlaceholder", text: $text, axis: .vertical)
                 .lineLimit(1...5)
+                // The keyboard learns nothing of what is written here.
+                .autocorrectionDisabled()
                 .textFieldStyle(.roundedBorder)
                 .accessibilityIdentifier("composer")
             Button {

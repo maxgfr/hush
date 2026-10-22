@@ -6,7 +6,7 @@ struct HushMain: App {
     @State private var store: HushStore?
     @State private var failure: String?
     @State private var router = Router()
-    @Environment(\.scenePhase) private var phase
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     init() {
         let info = ProcessInfo.processInfo
@@ -21,7 +21,7 @@ struct HushMain: App {
 
     var body: some Scene {
         WindowGroup {
-            ZStack {
+            Group {
                 if let store {
                     RootView()
                         .environment(store)
@@ -33,16 +33,13 @@ struct HushMain: App {
                 } else {
                     ContentUnavailableView("hush", systemImage: "exclamationmark.triangle", description: Text(failure ?? ""))
                 }
-                // Nothing of a conversation shows in the app switcher.
-                if phase != .active {
-                    PrivacyShield()
-                }
             }
             .onOpenURL { url in router.open(url) }
         }
     }
 }
 
+/// What the app switcher and a recording see (PrivacyCurtain shows it).
 struct PrivacyShield: View {
     var body: some View {
         ZStack {

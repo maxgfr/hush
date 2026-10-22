@@ -78,6 +78,24 @@ final class ViewModelTests: XCTestCase {
         XCTAssertEqual(model.error, String(localized: "vaultMismatch"))
     }
 
+    func testABackupPassphraseIsAsLongAsTheVaults() {
+        XCTAssertEqual(VaultModel.problem("short", confirm: "short"), String(localized: "vaultTooShort"))
+        XCTAssertEqual(VaultModel.problem("a long passphrase", confirm: "a long passphrasf"), String(localized: "vaultMismatch"))
+        XCTAssertNil(VaultModel.problem("a long passphrase", confirm: "a long passphrase"))
+    }
+
+    func testALinkFromElsewhereWaitsForJoin() {
+        let model = JoinModel()
+        let url = link()
+        model.prefill(url)
+        XCTAssertEqual(model.input, url)
+        XCTAssertNil(model.problem)
+        XCTAssertNil(model.link)
+        XCTAssertTrue(store.state.chats.isEmpty)
+        model.prefill(link(minutes: 10, now: Date(timeIntervalSinceNow: -3600)))
+        XCTAssertEqual(model.problem, .expired)
+    }
+
     func testAddByIdRefusesTypos() {
         let model = AddByIdModel()
         model.input = "hush1typo"

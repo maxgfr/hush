@@ -50,15 +50,22 @@ Everything in `SECURITY.md` holds. On top of it:
 - **Vault:** it lives in the app's private storage.
   - iOS: data protection `complete`, excluded from iCloud backups.
   - Android: `allowBackup="false"` and backup rules that exclude everything.
-- **Backups:** an exported backup can be copied anywhere and attacked offline, so on Android its passphrase follows the vault's rules: at least 10 characters, typed twice.
-- **Screens:** they are hidden from screenshots and the app switcher (Android `FLAG_SECURE`, iOS overlay when inactive).
+- **Backups:** an exported backup can be copied anywhere and attacked offline, so on both phones its passphrase follows the vault's rules: at least 10 characters, typed twice.
+- **Screens:**
+  - Android: `FLAG_SECURE` hides them from screenshots and the app switcher.
+  - iOS: a shield in a window of its own covers everything, sheets and previews included, in the app switcher and while the screen is recorded or mirrored. iOS gives an app no way to block screenshots.
 - **Logs:** no link, message, name or key is ever logged.
 - **Received files:** they stay in the app's private storage. They leave it only when you open or share one.
+  - The engine deletes one when it disappears, when its sender deletes it, and when the conversation ends, so nothing is left behind.
   - Android opens one, in an app you pick, with the type of its own extension, never the type the sender declared. Web pages, SVG, XML, scripts, packages and unknown types go out as opaque files.
+  - iOS: a file is shown as an image only if its bytes are PNG, JPEG, GIF, WebP or HEIC, whatever its name and type say, and if it is at most 50 megapixels (12000 pixels a side). It is drawn at 1024 pixels, away from the main thread. Quick Look never opens HTML, SVG or XML, which could load remote content.
 - **Clipboard:** copied links are marked sensitive (Android) or local and expiring (iOS).
   - Android clears a copied link after a minute, if it is still what the clipboard holds.
+  - iOS: Copy keeps a link, an identifier or a message on this phone (no Universal Clipboard) for 2 minutes. The share sheet's own Copy is the system's, out of the app's hands.
   - The link and the identifier are not selectable: every copy goes through the Copy button.
-- **Keyboard (Android):** text fields ask the keyboard not to learn from what is typed (`IME_FLAG_NO_PERSONALIZED_LEARNING`), and link fields turn autocorrect off. Passphrases, pasted links and drafts are never kept in the saved instance state.
+- **Keyboards:**
+  - Android: text fields ask the keyboard not to learn from what is typed (`IME_FLAG_NO_PERSONALIZED_LEARNING`), and link fields turn autocorrect off. Passphrases, pasted links and drafts are never kept in the saved instance state.
+  - iOS: third-party keyboards are refused, and the message field has no autocorrection or suggestions.
 - **Links from other apps:** a link opened from a browser or a messenger, or shared as text, only fills the Join screen. Nothing is joined until you tap Join.
   - Android does not verify the app link (there is no `assetlinks.json` to publish), so a link opens in the app only if you pick it, and otherwise in the browser, which runs the web app.
   - Either way the key is in the `#fragment`, which is never sent to the web server.

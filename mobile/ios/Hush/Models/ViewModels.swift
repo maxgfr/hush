@@ -26,7 +26,7 @@ final class Router {
         path = []
     }
 
-    /// A hush link opened from elsewhere (a universal link, a scanned code).
+    /// A hush link opened from elsewhere (a universal link, a code scanned by the camera app).
     @discardableResult
     func open(_ url: URL) -> Bool {
         guard JoinModel.isLink(url.absoluteString) else { return false }
@@ -101,6 +101,13 @@ final class JoinModel {
         }
     }
 
+    /// A link opened from elsewhere (a universal link): shown with what is wrong with it, joined only
+    /// once Join is tapped, so a web page or another app cannot connect us on its own.
+    func prefill(_ text: String) {
+        input = text
+        if case let .failure(p) = Self.check(text) { problem = p } else { problem = nil }
+    }
+
     /// Checks the link; joins it unless it needs a passphrase first.
     func submit(_ text: String, store: HushStore) async -> UInt64? {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -144,14 +151,17 @@ final class VaultModel {
     var error: String?
     var busy = false
 
+    /// What is wrong with a new passphrase (the vault's, a backup's), if anything.
+    static func problem(_ passphrase: String, confirm: String) -> String? {
+        if passphrase.count < minLength { return String(localized: "vaultTooShort") }
+        if passphrase != confirm { return String(localized: "vaultMismatch") }
+        return nil
+    }
+
     /// Creates the vault (`creating`) or unlocks it. True when done.
     func submit(_ store: HushStore, creating: Bool) async -> Bool {
-        if creating && passphrase.count < Self.minLength {
-            error = String(localized: "vaultTooShort")
-            return false
-        }
-        if creating && passphrase != confirm {
-            error = String(localized: "vaultMismatch")
+        if creating, let problem = Self.problem(passphrase, confirm: confirm) {
+            error = problem
             return false
         }
         error = nil

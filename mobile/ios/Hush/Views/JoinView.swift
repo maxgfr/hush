@@ -68,10 +68,7 @@ struct JoinView: View {
             }
         }
         .task {
-            if let initial, model.input.isEmpty {
-                model.input = initial
-                submit(initial)
-            }
+            if let initial, model.input.isEmpty { model.prefill(initial) }
         }
     }
 

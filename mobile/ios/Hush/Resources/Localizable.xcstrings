@@ -222,6 +222,23 @@
         }
       }
     },
+    "backupPasswordHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "To export: at least 10 characters, typed twice. To import: the backup's passphrase."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pour exporter : au moins 10 caractères, saisis deux fois. Pour importer : le mot de passe de la sauvegarde."
+          }
+        }
+      }
+    },
     "cameraUnavailable": {
       "extractionState": "manual",
       "localizations": {

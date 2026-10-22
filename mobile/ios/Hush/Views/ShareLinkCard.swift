@@ -17,9 +17,9 @@ struct ShareLinkCard: View {
             Text("sendThisLink").font(.title3.bold())
             Text("sendThisLinkHint").font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
             QRCodeView(text: url, size: 208)
+            // Not selectable: Copy below keeps it on this phone, for a while.
             Text(verbatim: url)
                 .font(.footnote.monospaced())
-                .textSelection(.enabled)
                 .multilineTextAlignment(.center)
                 .accessibilityIdentifier("share-link")
             HStack {

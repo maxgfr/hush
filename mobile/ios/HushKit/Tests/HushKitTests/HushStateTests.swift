@@ -92,6 +92,46 @@ struct HushStateTests {
         #expect(file("f")?.state == .failed(reason: "cancelled"))
     }
 
+    @Test func aReusedIdNeverReplacesWhatItShows() {
+        var s = s
+        s.apply(.peerJoined(chat: 1, peer: "p", name: "Bob", sas: Data(), verified: true))
+        s.apply(.peerJoined(chat: 1, peer: "q", name: "Eve", sas: Data(), verified: true))
+        s.apply(.message(chat: 1, peer: "p", id: "a", author: "Bob", text: "meet at 6", ts: 1, expiresAt: nil, past: false))
+        s.apply(.message(chat: 1, peer: "q", id: "a", author: "Eve", text: "meet at 9", ts: 2, expiresAt: nil, past: false))
+        s.apply(.fileOffered(chat: 1, peer: "q", id: "a", name: "x.png", size: 1, mime: "image/png", expiresAt: nil))
+        #expect(s.chats[1]!.items.count == 1)
+        #expect(s.chats[1]!.items[0].body == .text("meet at 6") && s.chats[1]!.items[0].peer == "p")
+        func file(_ id: String) -> FileModel? {
+            guard case let .file(f) = s.chats[1]!.items.first(where: { $0.id == id })?.body else { return nil }
+            return f
+        }
+        // A file is saved once; what comes after under its id changes nothing.
+        s.apply(.fileOffered(chat: 1, peer: "p", id: "f", name: "a.pdf", size: 10, mime: "application/pdf", expiresAt: nil))
+        s.apply(.fileOffered(chat: 1, peer: "q", id: "f", name: "b.pdf", size: 10, mime: "application/pdf", expiresAt: nil))
+        #expect(file("f")?.name == "a.pdf")
+        s.apply(.fileSaved(chat: 1, id: "f", path: "/r/a.pdf"))
+        s.apply(.fileSaved(chat: 1, id: "f", path: "/r/b.pdf"))
+        s.apply(.fileProgress(chat: 1, id: "f", done: 1, total: 10))
+        #expect(file("f")?.state == .saved(path: "/r/a.pdf"))
+        // Ours is never "saved", theirs never "delivered".
+        s.apply(.fileOffered(chat: 1, peer: nil, id: "g", name: "c.png", size: 20, mime: "image/png", expiresAt: nil))
+        s.apply(.fileSaved(chat: 1, id: "g", path: "/r/c.png"))
+        #expect(file("g")?.state == .sent)
+        s.apply(.fileDelivered(chat: 1, id: "f", peer: "q"))
+        #expect(file("f")?.state == .saved(path: "/r/a.pdf"))
+    }
+
+    @Test func noticesCannotBeTakenOrDeleted() throws {
+        var s = s
+        s.apply(.notice(chat: 1, notice: .joined(name: "Bob")))
+        let notice = try #require(s.chats[1]!.items.first)
+        s.apply(.messageDeleted(chat: 1, id: notice.id))
+        #expect(s.chats[1]!.items.count == 1)
+        // The next notice's id cannot be guessed and taken by a message.
+        s.apply(.notice(chat: 1, notice: .joined(name: "Bob")))
+        #expect(s.chats[1]!.items.count == 2 && s.chats[1]!.items.allSatisfy(\.isNotice))
+    }
+
     @Test func noticesOffersLockAndEnd() {
         var s = s
         s.apply(.notice(chat: 1, notice: .joined(name: "Bob")))

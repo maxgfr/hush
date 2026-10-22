@@ -14,9 +14,9 @@ struct IdentityView: View {
                 Section {
                     Text("idIntro").font(.footnote).foregroundStyle(.secondary)
                     QRCodeView(text: me, size: 200).frame(maxWidth: .infinity)
+                    // Not selectable: Copy below keeps it on this phone, for a while.
                     Text(verbatim: me)
                         .font(.callout.monospaced())
-                        .textSelection(.enabled)
                         .accessibilityIdentifier("my-id")
                     Button {
                         Clipboard.copy(me)
