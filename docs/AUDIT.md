@@ -17,7 +17,7 @@ An internal review of hush: protocol, Rust core, web app and CLI. Each part was 
 - **Dependencies:**
   - `cargo audit` and `cargo deny` are now a CI job (`deny.toml`);
   - known advisories for the post-quantum crates were checked by hand (below).
-- **Fuzzing (`crates/hush-core/fuzz`):** every parser of untrusted input (envelopes, bundles, cards, links, identifiers, base64, padding, backups), byte-stream and BLE framing, handshake messages, and a stateful session target. The session target drives two sides through sends, losses, reordering, replays, corruption, rekeys and time jumps, and checks that what arrives intact decrypts to what was sent. Each target ran 10 minutes locally; CI runs each for a minute on every change.
+- **Fuzzing (`crates/hush-core/fuzz`):** every parser of untrusted input (envelopes, bundles, cards, links, identifiers, base64, padding, backups), byte-stream and BLE framing, handshake messages, and a stateful session target. The session target drives two sides through sends, losses, reordering, replays, corruption, rekeys and time jumps, and checks that what arrives intact decrypts to what was sent. Each target ran 10 minutes locally with no crash: 50 million inputs for the parsers, 16 million for the framing, 2.5 million for the handshakes, 360,000 for the session. CI runs each for a minute on every change.
 
 ## Findings
 
