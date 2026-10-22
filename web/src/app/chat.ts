@@ -77,6 +77,8 @@ export abstract class Chat {
 
   private readonly outgoing = new Map<string, File>();
   private readonly downloads = new Map<string, Download>();
+  /** Downloads asked for before the direct link opened (the offer may come through the relays). */
+  private readonly wanted = new Set<FileItem>();
   protected readonly timers: ReturnType<typeof setInterval>[] = [];
   protected finished = false;
 
@@ -135,8 +137,14 @@ export abstract class Chat {
       {
         onMessage: (p, lane, data) => this.onMessage(p, lane, data),
         onClosed: (p, byPeer) => this.onPeerClosed(p, byPeer),
-        onState: () => {
+        onState: (p) => {
           this.peers.value = [...this.peers.value];
+          if (p.state.value !== "direct") return;
+          for (const item of this.wanted) {
+            if (item.owner !== p) continue;
+            this.wanted.delete(item);
+            this.download(item);
+          }
         },
       },
       name,
@@ -183,7 +191,13 @@ export abstract class Chat {
       const c = decodeChunk(data);
       if (!c) return;
       const key = `${toHex(peer.tag)}/${c.id}`;
-      if (this.downloads.get(key)?.add(c.index, c.data)) this.downloads.delete(key);
+      const dl = this.downloads.get(key);
+      if (!dl?.add(c.index, c.data)) return;
+      this.downloads.delete(key);
+      // Tell the sender it arrived intact (the CLI's `hush send` exits on it).
+      if (dl.item.state.value === "done") {
+        void peer.send(Lane.CHAT, encodeJson({ t: "file-end", id: c.id })).catch(() => {});
+      }
     }
   }
 
@@ -328,7 +342,8 @@ export abstract class Chat {
     const peer = item.owner;
     if (!peer || item.state.value === "downloading" || item.state.value === "done") return;
     if (!peer.rtc?.isOpen) {
-      item.state.value = "failed";
+      if (peer.state.value === "relay") item.state.value = "failed";
+      else this.wanted.add(item);
       return;
     }
     const dl = new Download(item);

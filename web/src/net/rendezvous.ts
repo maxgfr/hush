@@ -86,7 +86,9 @@ export class Rendezvous {
     const topic = channel.topic(hush().utcDay(now));
     const sealed = channel.seal(topic, this.tag, opts.to ?? new Uint8Array(0), kind, body, now);
     // Link handshakes also become manual codes, shown if the user opens the offline panel.
-    this.mux.send(topic, toB64u(sealed), { via: opts.via ?? (BY_HAND.has(kind) ? EVERYWHERE : NETWORK) });
+    this.mux.send(topic, toB64u(sealed), {
+      via: opts.via ?? (BY_HAND.has(kind) ? EVERYWHERE : NETWORK),
+    });
   }
 
   /** Feeds a scanned or pasted manual code; false when it is not one. */
