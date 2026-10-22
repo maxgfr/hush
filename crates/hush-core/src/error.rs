@@ -18,12 +18,14 @@ pub enum Error {
     Replay,
     /// The call does not fit the current state of the state machine.
     BadState,
-    /// A counter jumped further than the skipped-key window allows.
+    /// A counter jumped further than the skipped-key window allows, or a bounded buffer is full.
     TooFarAhead,
     /// A proof of work is missing or too weak.
     WeakProofOfWork,
     /// A parameter is out of range (e.g. Argon2 costs).
     InvalidParameter,
+    /// Made by an older version of the protocol that is no longer accepted (a version 1 link).
+    Outdated,
 }
 
 impl fmt::Display for Error {
@@ -39,6 +41,7 @@ impl fmt::Display for Error {
             Error::TooFarAhead => "too many skipped messages",
             Error::WeakProofOfWork => "proof of work too weak",
             Error::InvalidParameter => "invalid parameter",
+            Error::Outdated => "made by an older version of hush",
         })
     }
 }

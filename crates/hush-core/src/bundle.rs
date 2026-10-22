@@ -35,6 +35,23 @@ pub struct Bundle {
     pub bytes: Vec<u8>,
 }
 
+/// Zero-width and bidirectional-override characters that could make one name pass for another.
+const SPOOFING: [char; 15] = [
+    '\u{200b}', '\u{200c}', '\u{200d}', '\u{200e}', '\u{200f}', '\u{202a}', '\u{202b}', '\u{202c}', '\u{202d}',
+    '\u{202e}', '\u{2066}', '\u{2067}', '\u{2068}', '\u{2069}', '\u{feff}',
+];
+
+/// A peer-chosen name made safe to display: no control characters (terminal escapes included),
+/// no zero-width or bidi-override characters, no surrounding spaces.
+#[must_use]
+pub fn display_name(name: &str) -> String {
+    name.chars()
+        .filter(|c| !c.is_control() && !SPOOFING.contains(c))
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
 fn clamp_name(name: &str) -> &str {
     let mut end = name.len().min(MAX_NAME);
     while !name.is_char_boundary(end) {
@@ -67,10 +84,14 @@ impl Bundle {
     /// Parses and verifies a bundle.
     ///
     /// # Errors
-    /// [`Error::Malformed`], [`Error::BadSignature`], or [`Error::Expired`] once past its expiry.
+    /// [`Error::Malformed`], [`Error::BadSignature`], or [`Error::Expired`] once past its expiry
+    /// (or when it claims a lifetime longer than [`BUNDLE_TTL_MS`]).
     pub fn parse(b: &[u8], now_ms: u64) -> Result<Self> {
         let bundle = Self::parse_stored(b)?;
-        if now_ms >= bundle.expires_ms || bundle.created_ms > now_ms + 86_400_000 {
+        if now_ms >= bundle.expires_ms
+            || bundle.created_ms > now_ms + 86_400_000
+            || bundle.expires_ms.saturating_sub(bundle.created_ms) > BUNDLE_TTL_MS
+        {
             return Err(Error::Expired);
         }
         Ok(bundle)
@@ -101,9 +122,8 @@ impl Bundle {
         if name_len > MAX_NAME {
             return Err(Error::Malformed);
         }
-        let name = core::str::from_utf8(take(name_len)?)
-            .map_err(|_| Error::Malformed)?
-            .to_string();
+        // The signed bytes keep the name as sent; what callers display is cleaned.
+        let name = display_name(core::str::from_utf8(take(name_len)?).map_err(|_| Error::Malformed)?);
         let signed_len = FIXED_LEN + name_len;
         if b.len() != signed_len + SIG_LEN {
             return Err(Error::Malformed);
@@ -184,6 +204,30 @@ mod tests {
         assert!(Bundle::parse(&t, now).is_err());
         let long = Bundle::create(&me, &"é".repeat(40), now, &mut rng);
         assert!(long.name.len() <= MAX_NAME);
+    }
+
+    #[test]
+    fn overlong_lifetime_is_refused() {
+        let mut rng = crate::test_rng::rng();
+        let me = Identity::generate(&mut rng);
+        let now = 1_750_000_000_000;
+        let b = Bundle::create(&me, "", now, &mut rng);
+        let mut signed = b.bytes[..b.bytes.len() - SIG_LEN].to_vec();
+        let expires_at = signed.len() - 1 - 8;
+        signed[expires_at..expires_at + 8].copy_from_slice(&(now + 10 * BUNDLE_TTL_MS).to_be_bytes());
+        let sig = me.sign(b"bundle", &signed, &mut rng);
+        signed.extend_from_slice(&sig);
+        assert!(Bundle::parse_stored(&signed).is_ok());
+        assert_eq!(Bundle::parse(&signed, now).unwrap_err(), Error::Expired);
+    }
+
+    #[test]
+    fn names_are_cleaned_for_display() {
+        assert_eq!(display_name(" Bob\u{202e}kcilc\u{1b}]8;;x\u{7}\n "), "Bobkcilc]8;;x");
+        let mut rng = crate::test_rng::rng();
+        let me = Identity::generate(&mut rng);
+        let b = Bundle::create(&me, "A\u{1b}[2Jlice", 1_750_000_000_000, &mut rng);
+        assert_eq!(b.name, "A[2Jlice");
     }
 
     #[test]

@@ -3,16 +3,22 @@
 //! peer. Neither depends on the transport underneath: the same bytes work over WebRTC, LAN TCP,
 //! Bluetooth or a QR code.
 //!
-//! **Link handshake** `hush/v1/link: NNpsk0 + X-Wing` (J = whoever opens the link, C = its creator)
+//! **Link handshake** `hush/v2/link: NNpsk0 + X-Wing` (J = whoever opens the link, C = its creator)
 //! ```text
 //! prologue, psk = link keys
-//! HS1  J → C   e_J (X-Wing ek)                      MixHash(e_J)
+//! HS1  J → C   e_J (X-Wing ek)                      MixHash(e_J), MixKey(e_J)
 //!              AEAD(commit(N_J) || payload1)        (psk-keyed: proves J holds the link)
 //! HS2  C → J   ct = Encap(e_J)                      MixHash(ct), MixKey(ss)
-//!              AEAD(N_C || payload2)                (payload2 = SDP offer)
+//!              AEAD(N_C || payload2)                (payload2 = SDP offer)      h2 = h here
 //! HS3  J → C   AEAD(N_J || payload3)                (payload3 = SDP answer); C checks commit(N_J)
-//! SAS = f(h, N_C, N_J)                              each nonce fixed before the other is known
+//! SAS = f(h2, N_C, N_J)
 //! ```
+//! - `MixKey(e_J)` is Noise's validity rule for `psk` handshakes (Noise rev. 34, §9.2): without it
+//!   the key encrypting HS1 depends on the link alone, and every HS1 of a link (each group member
+//!   joining, each retry) would reuse one ChaCha20-Poly1305 key and nonce.
+//! - The SAS covers the transcript up to HS2 and nothing sent after a nonce is revealed. Hashing
+//!   HS3 too would let someone in the middle, playing the joiner, grind its free `payload3` once
+//!   it has seen `N_C` until both sides show the same emojis (about 2^30 tries).
 //!
 //! **Contact handshake** `hush/v1/contact: KKpsk0 + X-Wing` (I = initiator, R = responder), between
 //! two identities that already hold each other's signed prekeys (`spk`):
@@ -37,7 +43,7 @@ use crate::noise::SymmetricState;
 use crate::sas::{self, SAS_LEN};
 use crate::{Error, Result, Rng};
 
-const LINK_PROTOCOL: &[u8] = b"hush/v1/link:NNpsk0+XWing+SHA256+ChaChaPoly";
+const LINK_PROTOCOL: &[u8] = b"hush/v2/link:NNpsk0+XWing+SHA256+ChaChaPoly";
 const CONTACT_PROTOCOL: &[u8] = b"hush/v1/contact:KKpsk0+XWing+SHA256+ChaChaPoly";
 
 /// The outcome of a handshake: the root of the session's ratchet.
@@ -90,6 +96,7 @@ pub struct LinkJoiner {
 /// Joiner, after reading HS2.
 pub struct LinkJoinerReady {
     ss: SymmetricState,
+    sas_hash: [u8; 32],
     nonce_c: [u8; 32],
     nonce: Zeroizing<[u8; 32]>,
 }
@@ -104,6 +111,7 @@ pub struct LinkCreatorPending {
 /// Creator, after sending HS2.
 pub struct LinkCreator {
     ss: SymmetricState,
+    sas_hash: [u8; 32],
     commit_j: [u8; 32],
     nonce_c: [u8; 32],
 }
@@ -116,6 +124,7 @@ impl LinkJoiner {
         let nonce = Zeroizing::new(crate::random::<32, R>(rng));
         let ek = kem.public();
         ss.mix_hash(&ek);
+        ss.mix_key(&ek);
         let mut pt = sas::commit(&nonce).to_vec();
         pt.extend_from_slice(payload);
         let ct = ss.encrypt_and_hash(&pt).expect("keyed by the psk");
@@ -148,6 +157,7 @@ impl LinkJoiner {
         let (nonce_c, payload) = split_nonce(&pt)?;
         Ok((
             LinkJoinerReady {
+                sas_hash: ss.handshake_hash(),
                 ss,
                 nonce_c,
                 nonce: self.nonce.clone(),
@@ -168,7 +178,7 @@ impl LinkJoinerReady {
         let est = Established {
             root: Zeroizing::new(self.ss.split()),
             hash,
-            sas: Some(sas::derive(&hash, &self.nonce_c, &self.nonce)),
+            sas: Some(sas::derive(&self.sas_hash, &self.nonce_c, &self.nonce)),
             initiator: true,
         };
         (msg, est)
@@ -187,6 +197,7 @@ impl LinkCreatorPending {
         let mut ss = link_state(keys);
         let (ek, rest) = hs1.split_at(EK_LEN);
         ss.mix_hash(ek);
+        ss.mix_key(ek);
         let pt = ss.decrypt_and_hash(rest)?;
         let (commit_j, payload) = split_nonce(&pt)?;
         Ok((
@@ -215,6 +226,7 @@ impl LinkCreatorPending {
         msg.extend_from_slice(&body);
         Ok((
             LinkCreator {
+                sas_hash: self.ss.handshake_hash(),
                 ss: self.ss,
                 commit_j: self.commit_j,
                 nonce_c,
@@ -240,7 +252,7 @@ impl LinkCreator {
         let est = Established {
             root: Zeroizing::new(self.ss.split()),
             hash,
-            sas: Some(sas::derive(&hash, &self.nonce_c, &nonce_j)),
+            sas: Some(sas::derive(&self.sas_hash, &self.nonce_c, &nonce_j)),
             initiator: false,
         };
         Ok((payload.to_vec(), est))
@@ -540,6 +552,38 @@ mod tests {
             "the two people see different emojis (1 in 2^30 chance otherwise)"
         );
         assert_ne!(*e_j.root, *e_c.root);
+    }
+
+    #[test]
+    fn sas_ignores_what_follows_the_reveal() {
+        // Someone in the middle playing the joiner chooses HS3's payload after seeing N_C: if the
+        // emojis depended on it, it could try payloads until they match the other side's.
+        let mut rng = crate::test_rng::rng();
+        let (link, kc) = link_keys();
+        let kj = link.keys(None).unwrap();
+        let (joiner, hs1) = LinkJoiner::start(&kj, b"", &mut rng);
+        let (pending, _) = LinkCreatorPending::read_hs1(&kc, &hs1).unwrap();
+        let (_, hs2) = pending.write_hs2(b"offer", &mut rng).unwrap();
+        let (a, _) = joiner.read_hs2(&hs2).unwrap();
+        let (b, _) = joiner.read_hs2(&hs2).unwrap();
+        let (_, ea) = a.write_hs3(b"answer one");
+        let (_, eb) = b.write_hs3(b"answer two");
+        assert_ne!(ea.hash, eb.hash);
+        assert_eq!(ea.sas, eb.sas);
+    }
+
+    #[test]
+    fn each_first_message_has_its_own_key() {
+        // Two joiners of one link, same payload: with a key depending on the link alone the
+        // ciphertexts would be identical past the random commitment (one keystream, one nonce).
+        let mut rng = crate::test_rng::rng();
+        let (link, _) = link_keys();
+        let k = link.keys(None).unwrap();
+        let payload = [0u8; 64];
+        let (_, a) = LinkJoiner::start(&k, &payload, &mut rng);
+        let (_, b) = LinkJoiner::start(&k, &payload, &mut rng);
+        let tail = EK_LEN + 32..EK_LEN + 32 + payload.len();
+        assert_ne!(a[tail.clone()], b[tail]);
     }
 
     #[test]

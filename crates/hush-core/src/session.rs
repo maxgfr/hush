@@ -48,6 +48,14 @@ const MAX_BUFFERED: usize = 256;
 
 const HEADER_LEN: usize = 14;
 
+/// What an authentic frame asks for, decided before any state changes.
+enum Action {
+    App,
+    Bye,
+    Rekey(Vec<u8>, Zeroizing<[u8; 32]>),
+    RekeyAck(Zeroizing<[u8; 32]>),
+}
+
 mod inner {
     pub const APP: u8 = 0;
     pub const REKEY: u8 = 1;
@@ -415,9 +423,40 @@ impl Session {
         let padded = Zeroizing::new(open(&mk, &counter_nonce(ctr), &aad, &frame[HEADER_LEN..])?);
         let pt = crate::pad::unpad(&padded)?;
         let (&kind, body) = pt.split_first().ok_or(Error::Malformed)?;
-
-        // Authentic: commit the chain state.
         let in_current = epoch == self.cur.number;
+
+        // Everything that can fail runs before the chain state is committed.
+        let rekey_number = |body: &[u8]| -> Result<u32> {
+            Ok(u32::from_be_bytes(
+                body.get(..4)
+                    .ok_or(Error::Malformed)?
+                    .try_into()
+                    .map_err(|_| Error::Malformed)?,
+            ))
+        };
+        let action = match kind {
+            inner::APP => Action::App,
+            inner::BYE => Action::Bye,
+            inner::REKEY if !self.initiator && lane == lane::CTRL && in_current => {
+                if rekey_number(body)? != self.cur.number + 1 {
+                    return Err(Error::Malformed);
+                }
+                let (ct, shared) = encapsulate(&body[4..], rng)?;
+                Action::Rekey(ct, shared)
+            }
+            inner::REKEY_ACK if self.initiator && lane == lane::CTRL && in_current => {
+                let Some((expected, kem, _)) = &self.pending else {
+                    return Err(Error::BadState);
+                };
+                if rekey_number(body)? != *expected {
+                    return Err(Error::Malformed);
+                }
+                Action::RekeyAck(kem.decapsulate(&body[4..])?)
+            }
+            _ => return Err(Error::Malformed),
+        };
+
+        // Authentic and well formed: commit the chain state.
         let chains = if in_current {
             &mut self.cur.recv
         } else {
@@ -436,24 +475,14 @@ impl Session {
             self.cur.count += 1;
         }
 
-        match kind {
-            inner::APP => out.messages.push((lane, body.to_vec())),
-            inner::BYE => {
+        match action {
+            Action::App => out.messages.push((lane, body.to_vec())),
+            Action::Bye => {
                 out.closed = true;
                 self.wipe();
             }
-            inner::REKEY if !self.initiator && lane == lane::CTRL && in_current => {
-                let next = u32::from_be_bytes(
-                    body.get(..4)
-                        .ok_or(Error::Malformed)?
-                        .try_into()
-                        .map_err(|_| Error::Malformed)?,
-                );
-                if next != self.cur.number + 1 {
-                    return Err(Error::Malformed);
-                }
-                let (ct, shared) = encapsulate(&body[4..], rng)?;
-                let mut ack = next.to_be_bytes().to_vec();
+            Action::Rekey(ct, shared) => {
+                let mut ack = (self.cur.number + 1).to_be_bytes().to_vec();
                 ack.extend_from_slice(&ct);
                 // The acknowledgement still travels in the old epoch: the initiator cannot read the new one yet.
                 let frame = self.seal_inner(lane::CTRL, inner::REKEY_ACK, &ack)?;
@@ -461,20 +490,8 @@ impl Session {
                 self.advance(&shared, now_ms);
                 out.rekeyed = true;
             }
-            inner::REKEY_ACK if self.initiator && lane == lane::CTRL && in_current => {
-                let next = u32::from_be_bytes(
-                    body.get(..4)
-                        .ok_or(Error::Malformed)?
-                        .try_into()
-                        .map_err(|_| Error::Malformed)?,
-                );
-                let Some((expected, kem, _)) = self.pending.take() else {
-                    return Err(Error::BadState);
-                };
-                if next != expected {
-                    return Err(Error::Malformed);
-                }
-                let shared = kem.decapsulate(&body[4..])?;
+            Action::RekeyAck(shared) => {
+                self.pending = None;
                 self.advance(&shared, now_ms);
                 out.rekeyed = true;
                 for held in core::mem::take(&mut self.buffered) {
@@ -482,7 +499,6 @@ impl Session {
                     let _ = self.open_into(&held, now_ms, rng, out);
                 }
             }
-            _ => return Err(Error::Malformed),
         }
         Ok(())
     }
@@ -625,6 +641,24 @@ mod tests {
         let opened = b.open(&frames[0].1, 0, &mut rng).unwrap();
         a.open(&opened.replies[0].1, 0, &mut rng).unwrap();
         assert_eq!((a.epoch(), b.epoch()), (1, 1));
+    }
+
+    #[test]
+    fn malformed_rekey_leaves_the_state_untouched() {
+        let mut rng = crate::test_rng::rng();
+        let (mut a, mut b) = pair();
+        // An authentic REKEY announcing the wrong epoch, then a real one with the same counter
+        // position taken: the bad frame must not consume its key or advance the chain.
+        let bad = a.seal_inner(lane::CTRL, inner::REKEY, &7u32.to_be_bytes()).unwrap();
+        let ok = a.seal(lane::CTRL, b"after").unwrap();
+        assert_eq!(b.open(&bad, 0, &mut rng).unwrap_err(), Error::Malformed);
+        assert_eq!(
+            b.open(&bad, 0, &mut rng).unwrap_err(),
+            Error::Malformed,
+            "not marked as seen"
+        );
+        assert_eq!(b.open(&ok, 0, &mut rng).unwrap().messages[0].1, b"after");
+        assert_eq!(b.epoch(), 0);
     }
 
     #[test]

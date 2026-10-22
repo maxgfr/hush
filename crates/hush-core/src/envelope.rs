@@ -6,7 +6,7 @@
 //! inner    = ts_ms(u64) || from(16) || to(16, zero = everyone) || kind(1) || body
 //! ```
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{BTreeSet, HashSet};
 
 use crate::aead::{xopen, xseal};
 use crate::{Error, Result, Rng, VERSION};
@@ -100,16 +100,21 @@ pub fn open(key: &[u8; 32], topic: &[u8; 32], data: &[u8]) -> Result<Envelope> {
 }
 
 /// Drops stale and replayed envelopes. Keyed by the envelope's nonce, which is unique per seal.
+///
+/// A nonce is remembered until its envelope could no longer pass the freshness check, even through
+/// the longer window of manual codes, so a replay is caught however many envelopes arrive in
+/// between. When that many fresh envelopes are pending, new ones are refused rather than letting a
+/// flood push old nonces out.
 #[derive(Debug)]
 pub struct ReplayGuard {
     seen: HashSet<[u8; 24]>,
-    order: VecDeque<[u8; 24]>,
+    by_expiry: BTreeSet<(u64, [u8; 24])>,
     capacity: usize,
 }
 
 impl Default for ReplayGuard {
     fn default() -> Self {
-        Self::new(4096)
+        Self::new(16_384)
     }
 }
 
@@ -118,7 +123,7 @@ impl ReplayGuard {
     pub fn new(capacity: usize) -> Self {
         Self {
             seen: HashSet::new(),
-            order: VecDeque::new(),
+            by_expiry: BTreeSet::new(),
             capacity,
         }
     }
@@ -126,9 +131,10 @@ impl ReplayGuard {
     /// Accepts an envelope once, if fresh enough.
     ///
     /// # Errors
-    /// [`Error::Expired`] when outside the window, [`Error::Replay`] when already seen.
+    /// [`Error::Expired`] when outside the window, [`Error::Replay`] when already seen,
+    /// [`Error::TooFarAhead`] when the guard is full of envelopes still fresh.
     pub fn check(&mut self, data: &[u8], env: &Envelope, now_ms: u64, max_age_ms: u64) -> Result<()> {
-        if env.ts_ms + max_age_ms < now_ms || env.ts_ms > now_ms + max_age_ms {
+        if env.ts_ms.saturating_add(max_age_ms) < now_ms || env.ts_ms > now_ms.saturating_add(max_age_ms) {
             return Err(Error::Expired);
         }
         let nonce: [u8; 24] = data
@@ -136,15 +142,21 @@ impl ReplayGuard {
             .ok_or(Error::Malformed)?
             .try_into()
             .map_err(|_| Error::Malformed)?;
-        if !self.seen.insert(nonce) {
-            return Err(Error::Replay);
-        }
-        self.order.push_back(nonce);
-        if self.order.len() > self.capacity
-            && let Some(old) = self.order.pop_front()
+        while let Some(&(expiry, old)) = self.by_expiry.first()
+            && expiry < now_ms
         {
+            self.by_expiry.pop_first();
             self.seen.remove(&old);
         }
+        if self.seen.contains(&nonce) {
+            return Err(Error::Replay);
+        }
+        if self.seen.len() >= self.capacity {
+            return Err(Error::TooFarAhead);
+        }
+        let expiry = env.ts_ms.saturating_add(max_age_ms.max(MANUAL_MAX_AGE_MS));
+        self.seen.insert(nonce);
+        self.by_expiry.insert((expiry, nonce));
         Ok(())
     }
 }
@@ -174,6 +186,19 @@ mod tests {
         let mut guard = ReplayGuard::new(2);
         guard.check(&sealed, &opened, 1000, MAX_AGE_MS).unwrap();
         assert_eq!(guard.check(&sealed, &opened, 1000, MAX_AGE_MS), Err(Error::Replay));
+        // A flood of fresh envelopes cannot push a remembered nonce out.
+        let other = seal(&key, &topic, &env, &mut rng);
+        guard.check(&other, &opened, 1000, MAX_AGE_MS).unwrap();
+        let third = seal(&key, &topic, &env, &mut rng);
+        assert_eq!(guard.check(&third, &opened, 1000, MAX_AGE_MS), Err(Error::TooFarAhead));
+        assert_eq!(guard.check(&sealed, &opened, 1000, MAX_AGE_MS), Err(Error::Replay));
+        // Once they can no longer be fresh, their nonces are forgotten.
+        let later = Envelope {
+            ts_ms: 1000 + MANUAL_MAX_AGE_MS + 5,
+            ..env.clone()
+        };
+        let fresh = seal(&key, &topic, &later, &mut rng);
+        guard.check(&fresh, &later, later.ts_ms, MAX_AGE_MS).unwrap();
         assert_eq!(
             guard.check(&sealed, &opened, 1000 + MAX_AGE_MS + 1, MAX_AGE_MS),
             Err(Error::Expired)

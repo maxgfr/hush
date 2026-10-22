@@ -1,4 +1,4 @@
-//! Invitation links: `https://…/hush/#1.<mode>.<secret>.<expiry>[.p]`.
+//! Invitation links: `https://…/hush/#2.<mode>.<secret>.<expiry>[.p]`.
 //!
 //! The 32-byte secret only ever lives in the URL fragment, which browsers never send to the web
 //! server. Every key of the session's bootstrap is derived from it:
@@ -11,6 +11,9 @@
 //! psk      = Expand(root, "hush/v1/link/psk")                  or, with a passphrase:
 //! psk      = Expand(Extract(root, Argon2id(NFKC(pass), H("hush/v1/link/pass" || L)[..16])), "hush/v1/link/psk")
 //! ```
+//!
+//! Version 2 changed the link handshake (see `handshake`); version 1 links are refused with
+//! [`Error::Outdated`] so an old link fails clearly instead of as a wrong passphrase.
 //!
 //! The topic never depends on the passphrase, so a wrong passphrase fails the handshake loudly
 //! instead of silently waiting on another topic.
@@ -47,6 +50,9 @@ impl Mode {
         }
     }
 }
+
+/// The link format, first field of the fragment.
+pub const LINK_VERSION: &str = "2";
 
 /// Argon2id costs for link passphrases: 64 MiB, 3 passes, 1 lane.
 pub const LINK_PASS_PARAMS: KdfParams = KdfParams {
@@ -111,7 +117,7 @@ impl Link {
     /// Parses the fragment (with or without the leading `#`, or a full URL).
     ///
     /// # Errors
-    /// [`Error::Malformed`] when it is not a hush v1 link.
+    /// [`Error::Malformed`] when it is not a hush link, [`Error::Outdated`] for a version 1 link.
     pub fn parse(input: &str) -> Result<Self> {
         let input = input.trim();
         let fragment = match input.rfind('#') {
@@ -124,8 +130,10 @@ impl Link {
             [v, m, s, e, f] => (*v, *m, *s, *e, Some(*f)),
             _ => return Err(Error::Malformed),
         };
-        if version != "1" {
-            return Err(Error::Malformed);
+        match version {
+            LINK_VERSION => {}
+            "1" => return Err(Error::Outdated),
+            _ => return Err(Error::Malformed),
         }
         let passphrase = match flags {
             None => false,
@@ -144,7 +152,7 @@ impl Link {
     #[must_use]
     pub fn fragment(&self) -> String {
         let mut s = format!(
-            "1.{}.{}.{}",
+            "{LINK_VERSION}.{}.{}.{}",
             self.mode.code(),
             b64::encode(&*self.secret),
             base36(self.expires_min)
@@ -243,7 +251,7 @@ mod tests {
         let mut rng = crate::test_rng::rng();
         let link = Link::generate(Mode::Direct, 1_700_000_000_000, 60, false, &mut rng);
         let url = link.url("https://maxgfr.github.io/hush/");
-        assert!(url.starts_with("https://maxgfr.github.io/hush/#1.s."));
+        assert!(url.starts_with("https://maxgfr.github.io/hush/#2.s."));
         let parsed = Link::parse(&url).unwrap();
         assert_eq!(parsed.fragment(), link.fragment());
         assert_eq!(parsed.expires_min, 1_700_000_000_000 / 60_000 + 60);
@@ -262,13 +270,17 @@ mod tests {
             "",
             "#",
             "#2.s.AAAA.1",
-            "1.x.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.1",
-            "1.s.short.1",
-            "1.s.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.1.q",
-            "1.s.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.01",
+            "2.x.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.1",
+            "2.s.short.1",
+            "2.s.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.1.q",
+            "2.s.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.01",
         ] {
             assert!(Link::parse(bad).is_err(), "{bad}");
         }
+        assert_eq!(
+            Link::parse("https://maxgfr.github.io/hush/#1.s.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.1").err(),
+            Some(Error::Outdated)
+        );
     }
 
     #[test]
