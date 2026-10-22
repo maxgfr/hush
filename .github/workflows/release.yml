@@ -1,9 +1,10 @@
 name: Release
 
-# Publishes the hush CLI after CI passes on main: semantic-release reads the
-# conventional commits since the last cli-v* tag, and any fix/feat/perf or
-# breaking change releases a new version (tag cli-v<version>, with the four
-# binaries and SHA256SUMS that the Homebrew tap downloads).
+# Publishes hush after CI passes on main (web, Rust, CLI and both phone apps): semantic-release
+# reads the conventional commits since the last cli-v* tag, and any fix/feat/perf or breaking
+# change releases a new version (tag cli-v<version>) with the four CLI binaries the Homebrew tap
+# downloads, the signed Android app, and SHA256SUMS. The Android app is signed with the key held in
+# the ANDROID_KEYSTORE secrets; without them it is left out.
 on:
   workflow_run:
     workflows: [CI]
@@ -96,9 +97,60 @@ jobs:
           path: hush-${{ matrix.target }}
           if-no-files-found: error
 
+  android:
+    name: Build the Android app
+    needs: version
+    if: needs.version.outputs.version != ''
+    runs-on: ubuntu-latest
+    env:
+      HUSH_VERSION: ${{ needs.version.outputs.version }}
+      KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+    steps:
+      - if: env.KEYSTORE == ''
+        run: 'echo "::notice::no ANDROID_KEYSTORE secret, so this release has no Android app"'
+      - if: env.KEYSTORE != ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+      - if: env.KEYSTORE != ''
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: 17
+      - if: env.KEYSTORE != ''
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+      - if: env.KEYSTORE != ''
+        run: |
+          sdkmanager --install "ndk;27.2.12479018" >/dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          rustup toolchain install stable --profile minimal --target aarch64-linux-android,x86_64-linux-android && rustup default stable
+          cargo install cargo-ndk --version 4.1.2 --locked
+      - if: env.KEYSTORE != ''
+        run: mobile/scripts/build-android.sh
+      - if: env.KEYSTORE != ''
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - if: env.KEYSTORE != ''
+        name: Signed release build
+        working-directory: mobile/android
+        env:
+          HUSH_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          echo "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/hush.p12"
+          HUSH_ANDROID_KEYSTORE="$RUNNER_TEMP/hush.p12" ./gradlew --no-daemon assembleRelease
+          rm -f "$RUNNER_TEMP/hush.p12"
+          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/hush-android.apk"
+          "$ANDROID_SDK_ROOT"/build-tools/*/apksigner verify --print-certs "$GITHUB_WORKSPACE/hush-android.apk" | head -3
+      - if: env.KEYSTORE != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hush-android
+          path: hush-android.apk
+          if-no-files-found: error
+
   release:
     name: Publish
-    needs: [version, build]
+    needs: [version, build, android]
     runs-on: ubuntu-latest
     permissions:
       contents: write

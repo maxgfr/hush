@@ -21,7 +21,7 @@ use crate::HushError;
 type Res<T> = Result<T, HushError>;
 
 fn app_err(e: anyhow::Error) -> HushError {
-    HushError::App { message: e.to_string() }
+    HushError::App { reason: e.to_string() }
 }
 
 // ── configuration ───────────────────────────────────────────────────────────
@@ -598,7 +598,7 @@ impl HushApp {
             .thread_name("hush")
             .enable_all()
             .build()
-            .map_err(|e| HushError::App { message: e.to_string() })?;
+            .map_err(|e| HushError::App { reason: e.to_string() })?;
         let cfg = Config {
             name: hush_app::text::clean_name(&config.name),
             base: config.base,

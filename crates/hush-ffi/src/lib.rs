@@ -38,8 +38,8 @@ pub enum HushError {
     #[error("{name}")]
     Core { name: String },
     /// From the engine: a message to show, or a core error name ("Decrypt" for a wrong passphrase).
-    #[error("{message}")]
-    App { message: String },
+    #[error("{reason}")]
+    App { reason: String },
 }
 
 impl From<hush_core::Error> for HushError {
@@ -376,8 +376,8 @@ impl Session {
         lanes(locked(&self.inner).poll(now_ms, &mut rng()))
     }
 
-    /// The farewell frame; erases every key.
-    pub fn close(&self) -> Option<Vec<u8>> {
+    /// The farewell frame; erases every key. (Not `close`: Kotlin objects are `AutoCloseable`.)
+    pub fn farewell(&self) -> Option<Vec<u8>> {
         locked(&self.inner).close()
     }
 

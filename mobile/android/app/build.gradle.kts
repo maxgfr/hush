@@ -5,6 +5,11 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+// Release builds take their version from the release (HUSH_VERSION, e.g. 2.1.0) and are signed
+// with the key CI holds as a secret (HUSH_ANDROID_KEYSTORE, a PKCS#12 file, and its password).
+val releaseVersion: String? = System.getenv("HUSH_VERSION")
+val keystore: String? = System.getenv("HUSH_ANDROID_KEYSTORE")
+
 android {
     namespace = "io.github.maxgfr.hush"
     compileSdk = 37
@@ -13,15 +18,32 @@ android {
         applicationId = "io.github.maxgfr.hush"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionName = releaseVersion ?: "0.1.0"
+        versionCode = releaseVersion
+            ?.split(".")
+            ?.map { it.takeWhile(Char::isDigit).toIntOrNull() ?: 0 }
+            ?.let { (major, minor, patch) -> major * 10_000 + minor * 100 + patch }
+            ?: 1
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // The engine is built for these two (mobile/scripts/build-android.sh): phones and the emulator.
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
 
+    if (keystore != null) {
+        signingConfigs {
+            create("release") {
+                storeFile = file(keystore)
+                storeType = "pkcs12"
+                storePassword = System.getenv("HUSH_ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("HUSH_ANDROID_KEY_ALIAS") ?: "hush"
+                keyPassword = System.getenv("HUSH_ANDROID_KEYSTORE_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (keystore != null) signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
