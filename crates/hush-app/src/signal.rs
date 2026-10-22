@@ -1,6 +1,7 @@
-//! Signaling transports (Nostr relays, WebTorrent trackers) and the rendezvous layer, as in
-//! `web/src/signal/{nostr,torrent}.ts` and `web/src/net/rendezvous.ts`. Transports only ever carry
-//! envelopes sealed by the core, under daily rotating topics.
+//! Signaling transports (Nostr relays, WebTorrent trackers, and Bluetooth or Wi-Fi links to nearby
+//! devices) and the rendezvous layer, as in `web/src/signal/{nostr,torrent}.ts` and
+//! `web/src/net/rendezvous.ts`. Transports only ever carry envelopes sealed by the core, under
+//! daily rotating topics.
 
 use crate::util::{b64u, from_b64u, now_ms, random};
 use futures_util::{SinkExt, StreamExt};
@@ -224,6 +225,9 @@ pub struct Channel {
     guard: ReplayGuard,
 }
 
+/// How long a Bluetooth or Wi-Fi discovery token lasts.
+pub const TOKEN_SLOT_MS: u64 = 10 * 60_000;
+
 impl Channel {
     pub fn new(key: [u8; 32], topic: impl Fn(u32) -> [u8; 32] + Send + 'static) -> Self {
         Self {
@@ -231,6 +235,13 @@ impl Channel {
             topic: Box::new(topic),
             guard: ReplayGuard::default(),
         }
+    }
+
+    /// The token nearby devices advertise for this channel during a 10-minute slot. It derives
+    /// from the envelope key, not the topic, so a relay that sees the topic cannot recognize it.
+    pub fn token(&self, slot: u64) -> [u8; 16] {
+        let mac = hush_core::kdf::hmac(&self.key, &[b"hush/v2/local/adv", &slot.to_be_bytes()]);
+        mac[..16].try_into().expect("16 bytes")
     }
 }
 
@@ -241,10 +252,21 @@ impl Drop for Channel {
 }
 
 pub type ChannelId = u32;
+/// A Bluetooth or Wi-Fi link to a nearby device, numbered by the app.
+pub type LinkId = u64;
 
+#[derive(Clone, Debug, Default)]
 pub struct SignalConfig {
     pub relays: Vec<String>,
     pub trackers: Vec<String>,
+}
+
+/// How an envelope reached us.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Via {
+    Network,
+    Manual,
+    Local(LinkId),
 }
 
 pub struct Rendezvous {
@@ -258,10 +280,19 @@ pub struct Rendezvous {
     seen: HashSet<Vec<u8>>,
     /// Manual mode: envelopes are printed as codes instead of (or as well as) sent.
     pub manual: bool,
+    /// The channels each nearby link has carried: envelopes of a channel go to those links.
+    local: HashMap<LinkId, HashSet<ChannelId>>,
+    /// Envelopes for nearby links: `(link, topic || envelope)`, sent by the engine.
+    local_out: mpsc::UnboundedSender<(LinkId, Vec<u8>)>,
+    /// Which nearby link each peer (by channel and tag) was last heard on.
+    local_peers: HashMap<(ChannelId, PeerTag), LinkId>,
+    inbound: Inbound,
+    peer_id: String,
 }
 
 impl Rendezvous {
-    pub fn new(cfg: &SignalConfig) -> Self {
+    /// `local_out` receives what must go to nearby links (`topic || envelope`).
+    pub fn new(cfg: &SignalConfig, local_out: mpsc::UnboundedSender<(LinkId, Vec<u8>)>) -> Self {
         let tag: PeerTag = random();
         let peer_id: String = b64u(&tag).chars().take(20).collect();
         let (in_tx, rx) = mpsc::unbounded_channel();
@@ -282,7 +313,82 @@ impl Rendezvous {
             day: hush_core::utc_day(now_ms()),
             seen: HashSet::new(),
             manual: false,
+            local: HashMap::new(),
+            local_out,
+            local_peers: HashMap::new(),
+            inbound: in_tx,
+            peer_id,
         }
+    }
+
+    /// Replaces the relays and trackers, keeping every channel joined.
+    pub fn reconfigure(&mut self, cfg: &SignalConfig) {
+        self.outs.clear(); // dropping the senders ends their tasks
+        for r in &cfg.relays {
+            self.outs.push(spawn_nostr(r.clone(), self.inbound.clone()));
+        }
+        for t in &cfg.trackers {
+            self.outs
+                .push(spawn_tracker(t.clone(), self.peer_id.clone(), self.inbound.clone()));
+        }
+        let topics: Vec<[u8; 32]> = self.topics.keys().copied().collect();
+        for t in topics {
+            self.broadcast(OutCmd::Join(t));
+        }
+    }
+
+    /// The nearby link a peer of this channel was heard on, if it is still open.
+    pub fn local_peer(&self, ch: ChannelId, tag: &PeerTag) -> Option<LinkId> {
+        let link = *self.local_peers.get(&(ch, *tag))?;
+        self.local.contains_key(&link).then_some(link)
+    }
+
+    /// A nearby link opened. `channel` is the one it was found for, if we dialed it.
+    pub fn local_opened(&mut self, link: LinkId, channel: Option<ChannelId>) {
+        self.local.entry(link).or_default().extend(channel);
+    }
+
+    pub fn local_closed(&mut self, link: LinkId) {
+        self.local.remove(&link);
+        self.local_peers.retain(|_, l| *l != link);
+    }
+
+    /// The discovery tokens of every channel: `(channel, token)` for the current slot and, when
+    /// `with_previous`, the one before (a peer whose clock is a little behind).
+    pub fn tokens(&self, now_ms: u64, with_previous: bool) -> Vec<(ChannelId, [u8; 16])> {
+        let slot = now_ms / TOKEN_SLOT_MS;
+        let mut out = Vec::new();
+        for (id, (ch, _)) in &self.channels {
+            out.push((*id, ch.token(slot)));
+            if with_previous && slot > 0 {
+                out.push((*id, ch.token(slot - 1)));
+            }
+        }
+        out.sort();
+        out
+    }
+
+    /// An envelope from a nearby link: `topic(32) || envelope`.
+    pub fn open_local(&mut self, link: LinkId, data: &[u8]) -> Option<(ChannelId, Envelope)> {
+        if data.len() < 32 {
+            return None;
+        }
+        let topic: [u8; 32] = data[..32].try_into().ok()?;
+        let id = *self.topics.get(&topic)?;
+        let (ch, _) = self.channels.get_mut(&id)?;
+        let sealed = &data[32..];
+        let env = envelope::open(&ch.key, &topic, sealed).ok()?;
+        // Authentic: whatever the replay guard says, this peer is reachable on this link (the
+        // same envelope may have come through a relay first).
+        self.local.entry(link).or_default().insert(id);
+        if env.from != self.tag {
+            self.local_peers.insert((id, env.from), link);
+        }
+        ch.guard.check(sealed, &env, now_ms(), envelope::MAX_AGE_MS).ok()?;
+        if env.from == self.tag || (env.to != envelope::BROADCAST && env.to != self.tag) {
+            return None;
+        }
+        Some((id, env))
     }
 
     fn broadcast(&self, cmd: OutCmd) {
@@ -304,6 +410,10 @@ impl Rendezvous {
     }
 
     pub fn remove(&mut self, id: ChannelId) {
+        for chans in self.local.values_mut() {
+            chans.remove(&id);
+        }
+        self.local_peers.retain(|(ch, _), _| *ch != id);
         if let Some((_, topics)) = self.channels.remove(&id) {
             for t in topics {
                 self.topics.remove(&t);
@@ -350,7 +460,15 @@ impl Rendezvous {
             kind,
             body: body.to_vec(),
         };
-        let wire = b64u(&envelope::seal(&ch.key, &topic, &env, &mut crate::util::rng()));
+        let sealed = envelope::seal(&ch.key, &topic, &env, &mut crate::util::rng());
+        for (link, chans) in &self.local {
+            if chans.contains(&id) {
+                let mut payload = topic.to_vec();
+                payload.extend_from_slice(&sealed);
+                let _ = self.local_out.send((*link, payload));
+            }
+        }
+        let wire = b64u(&sealed);
         self.broadcast(OutCmd::Send {
             topic,
             wire: wire.clone(),

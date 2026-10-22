@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/hush-core", "crates/hush-wasm", "crates/hush-cli", "crates/hush-ffi"]
+members = ["crates/hush-core", "crates/hush-wasm", "crates/hush-app", "crates/hush-cli", "crates/hush-ffi"]
 
 [workspace.package]
 version = "0.1.0"

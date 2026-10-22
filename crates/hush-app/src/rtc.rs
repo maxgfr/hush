@@ -63,8 +63,17 @@ impl PeerConnectionEventHandler for Handler {
     }
 }
 
+/// A STUN or TURN server.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct IceServer {
+    pub urls: Vec<String>,
+    pub username: String,
+    pub credential: String,
+}
+
+#[derive(Clone, Debug, Default)]
 pub struct RtcOptions {
-    pub ice_servers: Vec<RTCIceServer>,
+    pub ice_servers: Vec<IceServer>,
     pub relay_only: bool,
 }
 
@@ -107,7 +116,16 @@ async fn run<K: Copy + Send + 'static>(
     setting.set_sctp_max_message_size(
         rtc::peer_connection::configuration::setting_engine::SctpMaxMessageSize::Bounded(262_144),
     );
-    let mut config = RTCConfigurationBuilder::new().with_ice_servers(opts.ice_servers);
+    let servers = opts
+        .ice_servers
+        .into_iter()
+        .map(|s| RTCIceServer {
+            urls: s.urls,
+            username: s.username,
+            credential: s.credential,
+        })
+        .collect();
+    let mut config = RTCConfigurationBuilder::new().with_ice_servers(servers);
     if opts.relay_only {
         config = config.with_ice_transport_policy(RTCIceTransportPolicy::Relay);
     }

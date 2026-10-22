@@ -1,0 +1,33 @@
+[package]
+name = "hush-app"
+description = "The hush application layer shared by the CLI and the mobile apps: conversations, contacts, vault, and every transport (Nostr, WebTorrent trackers, WebRTC, Bluetooth and Wi-Fi links)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+hush-core = { path = "../hush-core" }
+getrandom = { version = "=0.4.3", features = ["sys_rng"] }
+rand_core = "=0.10.1"
+webrtc = "=0.20.5"
+rtc = "=0.20.5"
+async-trait = "0.1"
+bytes = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util"] }
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+futures-util = "0.3"
+k256 = { version = "0.13", features = ["schnorr"] }
+rand = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hex = "0.4"
+anyhow = "1"
+sha2 = "0.10"
+zeroize = "=1.9.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "test-util"] }
+tempfile = "3"
