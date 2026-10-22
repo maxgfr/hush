@@ -14,7 +14,7 @@ import uniffi.hush_ffi.Medium
  * One TCP listener per advertised token, on every interface (the local network and a Wi-Fi Direct
  * group alike). Whoever connects gets a stream link; the engine decides what it is worth.
  */
-class TcpServers(private val hub: LinkHub, private val bind: InetAddress? = null) {
+class TcpServers(private val hub: LinkHub, private val address: InetAddress? = null) {
     private val servers = HashMap<String, ServerSocket>()
 
     /** Listens for exactly these tokens; returns each one's port, by hex. */
@@ -25,16 +25,16 @@ class TcpServers(private val hub: LinkHub, private val bind: InetAddress? = null
             // Links already accepted stay open: only the listener goes.
             try {
                 servers.remove(gone)?.close()
-            } catch (_: IOException) {
+            } catch (ignored: IOException) {
             }
         }
         for (hex in wanted - servers.keys) {
             val server = try {
                 ServerSocket().apply {
                     reuseAddress = true
-                    bind(InetSocketAddress(bind, 0))
+                    bind(InetSocketAddress(address, 0))
                 }
-            } catch (_: IOException) {
+            } catch (ignored: IOException) {
                 continue
             }
             servers[hex] = server
@@ -47,7 +47,7 @@ class TcpServers(private val hub: LinkHub, private val bind: InetAddress? = null
         while (!server.isClosed) {
             val socket = try {
                 server.accept()
-            } catch (_: IOException) {
+            } catch (ignored: IOException) {
                 return
             }
             Tcp.link(hub, socket).start(Medium.WIFI, null)
@@ -75,10 +75,10 @@ class TcpDialer(private val hub: LinkHub) {
             try {
                 socket.connect(InetSocketAddress(host, port), CONNECT_TIMEOUT_MS)
                 Tcp.link(hub, socket, onClosed).start(Medium.WIFI, token)
-            } catch (_: IOException) {
+            } catch (ignored: IOException) {
                 try {
                     socket.close()
-                } catch (_: IOException) {
+                } catch (ignored: IOException) {
                 }
                 hub.release(hex)
                 onClosed()

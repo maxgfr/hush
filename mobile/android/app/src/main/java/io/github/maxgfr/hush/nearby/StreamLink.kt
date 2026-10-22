@@ -40,7 +40,7 @@ class StreamLink(
         queue.offer(STOP)
         try {
             resource.close()
-        } catch (_: IOException) {
+        } catch (ignored: IOException) {
         }
         hub.closed(id)
         onClosed()
@@ -54,7 +54,7 @@ class StreamLink(
                 if (n < 0) break
                 if (n > 0) hub.data(id, buf.copyOf(n))
             }
-        } catch (_: IOException) {
+        } catch (ignored: IOException) {
         }
         close()
     }
@@ -76,8 +76,8 @@ class StreamLink(
                 batch.clear()
                 hub.sent(id, bytes)
             }
-        } catch (_: IOException) {
-        } catch (_: InterruptedException) {
+        } catch (ignored: IOException) {
+        } catch (ignored: InterruptedException) {
         } finally {
             close()
         }

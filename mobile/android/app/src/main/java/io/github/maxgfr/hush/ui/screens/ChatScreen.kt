@@ -539,7 +539,7 @@ private fun FileCard(vm: MainViewModel, chat: ChatState, f: FileItem) {
 private fun openFile(context: Context, path: String, mime: String) {
     val uri = try {
         FileProvider.getUriForFile(context, "${context.packageName}.files", File(path))
-    } catch (_: IllegalArgumentException) {
+    } catch (ignored: IllegalArgumentException) {
         return
     }
     val view = Intent(Intent.ACTION_VIEW)
@@ -547,7 +547,7 @@ private fun openFile(context: Context, path: String, mime: String) {
         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     try {
         context.startActivity(view)
-    } catch (_: ActivityNotFoundException) {
+    } catch (ignored: ActivityNotFoundException) {
         Toast.makeText(context, R.string.no_app_to_open, Toast.LENGTH_SHORT).show()
     }
 }

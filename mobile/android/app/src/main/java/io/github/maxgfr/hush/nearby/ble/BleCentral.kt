@@ -169,13 +169,13 @@ class BleCentral(
         private fun openL2cap(g: BluetoothGatt, psm: Int) {
             val socket = try {
                 device.createInsecureL2capChannel(psm)
-            } catch (_: IOException) {
+            } catch (ignored: IOException) {
                 synchronized(this) { usePackets(g) }
                 return
             }
             try {
                 socket.connect()
-            } catch (_: IOException) {
+            } catch (ignored: IOException) {
                 runCatching { socket.close() }
                 synchronized(this) { usePackets(g) }
                 return

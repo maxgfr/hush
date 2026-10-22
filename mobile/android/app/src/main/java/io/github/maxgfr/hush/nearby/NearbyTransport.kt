@@ -87,7 +87,7 @@ class NearbyTransport(
     private inline fun safely(block: () -> Unit) {
         try {
             block()
-        } catch (_: RuntimeException) {
+        } catch (ignored: RuntimeException) {
         }
     }
 }

@@ -47,7 +47,7 @@ class HushService : Service() {
             .build()
         try {
             ServiceCompat.startForeground(this, ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
-        } catch (_: RuntimeException) {
+        } catch (ignored: RuntimeException) {
             // Not allowed right now (background start, missing prerequisite): hush still works while open.
             stopSelf()
         }
@@ -63,8 +63,8 @@ class HushService : Service() {
             val intent = Intent(context, HushService::class.java)
             try {
                 if (on) ContextCompat.startForegroundService(context, intent) else context.stopService(intent)
-            } catch (_: IllegalStateException) {
-            } catch (_: SecurityException) {
+            } catch (ignored: IllegalStateException) {
+            } catch (ignored: SecurityException) {
             }
         }
     }

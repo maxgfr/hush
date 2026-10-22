@@ -158,7 +158,7 @@ private fun decode(reader: QRCodeReader, image: ImageProxy): String? {
     val source = PlanarYUVLuminanceSource(bytes, plane.rowStride, image.height, 0, 0, image.width, image.height, false)
     return try {
         reader.decode(BinaryBitmap(HybridBinarizer(source)), mapOf(DecodeHintType.TRY_HARDER to true)).text
-    } catch (_: ReaderException) {
+    } catch (ignored: ReaderException) {
         null
     } finally {
         reader.reset()

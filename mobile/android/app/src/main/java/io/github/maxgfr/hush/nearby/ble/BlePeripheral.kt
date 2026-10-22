@@ -121,7 +121,7 @@ class BlePeripheral(
         if (l2cap != null) return
         val socket = try {
             adapter.listenUsingInsecureL2capChannel()
-        } catch (_: IOException) {
+        } catch (ignored: IOException) {
             return
         }
         l2cap = socket
@@ -130,7 +130,7 @@ class BlePeripheral(
             while (true) {
                 val s = try {
                     socket.accept()
-                } catch (_: IOException) {
+                } catch (ignored: IOException) {
                     break
                 }
                 StreamLink(hub, hub.newId(), s.inputStream, s.outputStream, s).start(Medium.BLUETOOTH, null)
