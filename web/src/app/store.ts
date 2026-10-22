@@ -11,6 +11,7 @@
 import { signal } from "@preact/signals";
 import { hush, type Identity, normalizePassphrase, type Vault } from "../core/wasm";
 import { fromB64u, fromUtf8, toB64u, toHex, utf8 } from "../lib/bytes";
+import { cleanName } from "./protocol";
 
 export interface Contact {
   /** `hush1…` */
@@ -265,7 +266,7 @@ export async function importBackup(file: Uint8Array, passphrase: string): Promis
     } catch {
       continue;
     }
-    await saveContact(c);
+    await saveContact({ ...c, name: cleanName(String(c.name ?? "")), history: c.history === true });
     const h = snap.history[c.key];
     if (Array.isArray(h)) await writeRecord("history", c.key, h.slice(-MAX_HISTORY));
     n++;
