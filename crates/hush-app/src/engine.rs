@@ -2022,6 +2022,18 @@ impl Engine {
                 medium,
                 token,
             } => {
+                if self.cfg.local && self.links.len() >= local::MAX_LINKS {
+                    // Full: the oldest link that never carried anything authentic makes room.
+                    let silent = self
+                        .links
+                        .iter()
+                        .filter(|(_, l)| l.silent_for(local::SILENT_GRACE))
+                        .min_by_key(|(_, l)| l.opened())
+                        .map(|(id, _)| *id);
+                    if let Some(old) = silent {
+                        self.close_link(old);
+                    }
+                }
                 if !self.cfg.local || self.links.len() >= local::MAX_LINKS {
                     if let Some(h) = &self.host {
                         h.close(link);

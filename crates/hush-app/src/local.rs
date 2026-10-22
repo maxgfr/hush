@@ -21,9 +21,11 @@ pub const MAX_LINKS: usize = 8;
 pub const MAX_INVALID: u32 = 32;
 /// Bytes handed to the app and not yet written, beyond which file chunks wait.
 pub const MAX_QUEUED: usize = 1 << 20;
-/// A link that has carried nothing authentic by then is closed: a neighbour cannot hold the
-/// few link slots with silent connections.
+/// A link that has carried nothing authentic by then is closed.
 pub const IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+/// With every slot taken, a link silent this long gives way to a new one: a neighbour cannot
+/// hold the few slots with silent connections (a real peer speaks within a second).
+pub const SILENT_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// The link misbehaved and must be closed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,7 +73,16 @@ impl LocalLink {
 
     /// Open for a while without carrying anything authentic.
     pub fn idle(&self) -> bool {
-        !self.useful && self.peer.is_none() && self.opened.elapsed() >= IDLE_TIMEOUT
+        self.silent_for(IDLE_TIMEOUT)
+    }
+
+    /// Nothing authentic came over it, in at least `d` since it opened.
+    pub fn silent_for(&self, d: std::time::Duration) -> bool {
+        !self.useful && self.peer.is_none() && self.opened.elapsed() >= d
+    }
+
+    pub fn opened(&self) -> std::time::Instant {
+        self.opened
     }
 
     /// The writes that carry one record: one buffer for a stream, one per packet otherwise.
@@ -153,5 +164,14 @@ mod tests {
             assert!(p.push(&[0, 0, 9]).is_ok());
         }
         assert!(p.push(&[0, 0, 9]).is_err());
+    }
+
+    #[test]
+    fn only_silent_links_give_way() {
+        let mut l = LocalLink::new(LocalKind::Stream, LocalMedium::Wifi, None);
+        assert!(l.silent_for(std::time::Duration::ZERO));
+        assert!(!l.silent_for(SILENT_GRACE), "a new link gets its grace");
+        l.useful = true;
+        assert!(!l.silent_for(std::time::Duration::ZERO));
     }
 }
