@@ -34,3 +34,13 @@ pub fn from_b64u(s: &str) -> Option<Vec<u8>> {
 pub fn new_id() -> String {
     b64u(&random::<12>())
 }
+
+/// Why a link was refused, in words.
+pub fn link_error(e: hush_core::Error) -> anyhow::Error {
+    match e {
+        hush_core::Error::Outdated => {
+            anyhow::anyhow!("this link comes from an older version of hush: ask for a new one")
+        }
+        _ => anyhow::anyhow!("not a hush link"),
+    }
+}

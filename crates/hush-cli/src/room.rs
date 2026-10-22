@@ -25,6 +25,9 @@ const RESEND: Duration = Duration::from_secs(6);
 const DIRECT_TIMEOUT: Duration = Duration::from_secs(20);
 const IN_FLIGHT: usize = 64;
 const MAX_GROUP: usize = 16;
+/// Handshakes waiting for their last message at once, and for how long.
+const MAX_PENDING: usize = 4;
+const PENDING_TIMEOUT: Duration = Duration::from_secs(45);
 
 pub struct RoomOptions {
     /// Join this link, or create one.
@@ -194,6 +197,15 @@ pub fn clean_name(s: &str) -> String {
         .collect()
 }
 
+/// How a peer appears in notices: its name, or its tag when it has none.
+fn who_label(name: &str, tag_hex: &str) -> String {
+    if name.is_empty() {
+        tag_hex.to_string()
+    } else {
+        name.to_string()
+    }
+}
+
 fn clean_text(s: &str) -> String {
     s.chars()
         .filter(|c| *c == '\n' || *c == '\t' || !c.is_control())
@@ -209,7 +221,7 @@ pub struct Room {
     joiner: Option<LinkJoiner>,
     hs1: Option<Vec<u8>>,
     last_hs1: Instant,
-    awaiting: HashMap<PeerTag, (LinkCreator, String, mpsc::UnboundedSender<RtcCmd>)>,
+    awaiting: HashMap<PeerTag, (LinkCreator, String, mpsc::UnboundedSender<RtcCmd>, Instant)>,
     answered: HashSet<PeerTag>,
     peers: HashMap<PeerTag, Peer>,
     sessions_by_channel: HashMap<ChannelId, PeerTag>,
@@ -228,7 +240,7 @@ impl Room {
     pub fn new(opts: RoomOptions, events: mpsc::UnboundedSender<Event>) -> Result<Self> {
         let pass = opts.passphrase.clone().filter(|p| !p.is_empty());
         let (link, creator) = match &opts.join {
-            Some(input) => (Link::parse(input).map_err(|_| anyhow!("not a hush link"))?, false),
+            Some(input) => (Link::parse(input).map_err(crate::util::link_error)?, false),
             None => (
                 Link::generate(
                     if opts.group { Mode::Group } else { Mode::Direct },
@@ -367,6 +379,13 @@ impl Room {
 
     fn on_tick(&mut self) {
         self.rdv.rotate();
+        self.awaiting.retain(|_, (_, _, rtc, since)| {
+            let alive = since.elapsed() < PENDING_TIMEOUT;
+            if !alive {
+                let _ = rtc.send(RtcCmd::Close);
+            }
+            alive
+        });
         let now = now_ms();
         let waiting = self.peers.is_empty();
         if waiting && now >= self.expires_ms && self.awaiting.is_empty() {
@@ -427,7 +446,8 @@ impl Room {
             return;
         }
         let full = if self.opts.group {
-            self.locked || self.live() >= MAX_GROUP - 1
+            // Someone holding the link could otherwise open connections without end.
+            self.locked || self.live() >= MAX_GROUP - 1 || self.awaiting.len() >= MAX_PENDING
         } else {
             !self.peers.is_empty() || !self.awaiting.is_empty()
         };
@@ -453,12 +473,12 @@ impl Room {
             let _ = rtc.send(RtcCmd::Close);
             return;
         };
-        self.awaiting.insert(from, (creator, name, rtc));
+        self.awaiting.insert(from, (creator, name, rtc, Instant::now()));
         self.send_link(kind::HS2, &hs2, from);
     }
 
     async fn on_hs3(&mut self, from: PeerTag, hs3: &[u8]) {
-        let Some((creator, name, rtc)) = self.awaiting.remove(&from) else {
+        let Some((creator, name, rtc, _)) = self.awaiting.remove(&from) else {
             return;
         };
         let Ok((payload, est)) = creator.read_hs3(hs3) else {
@@ -473,7 +493,8 @@ impl Room {
     }
 
     async fn on_hs2(&mut self, from: PeerTag, hs2: &[u8]) {
-        if self.answered.contains(&from) || (!self.opts.group && !self.peers.is_empty()) {
+        if self.answered.contains(&from) || (!self.opts.group && !self.peers.is_empty()) || self.live() >= MAX_GROUP - 1
+        {
             return;
         }
         let Some(joiner) = &self.joiner else { return };
@@ -637,7 +658,12 @@ impl Room {
         match (l, v["t"].as_str()) {
             (lane::CTRL, Some("name")) => {
                 if let (Some(p), Some(n)) = (self.peers.get_mut(tag), v["name"].as_str()) {
-                    p.name = clean_name(n);
+                    let n = clean_name(n);
+                    if n != p.name {
+                        let notice = format!("{} is now called {n}", who_label(&p.name, &peer));
+                        p.name = n;
+                        self.emit(Event::Notice(notice));
+                    }
                 }
             }
             (lane::CTRL, Some("verified")) => {
@@ -648,7 +674,15 @@ impl Room {
                     }
                 }
             }
-            (lane::CTRL, Some("lock")) => self.locked = v["locked"].as_bool().unwrap_or(false),
+            (lane::CTRL, Some("lock")) => {
+                if let Some(locked) = v["locked"].as_bool()
+                    && locked != self.locked
+                {
+                    self.locked = locked;
+                    let what = if locked { "locked the room" } else { "unlocked the room" };
+                    self.emit(Event::Notice(format!("{} {what}", who_label(&name, &peer))));
+                }
+            }
             (lane::CHAT, Some("msg")) => {
                 if let Some(text) = v["text"].as_str() {
                     self.emit(Event::Message {
@@ -864,9 +898,8 @@ impl Room {
             return;
         }
         if dl.file.is_none() {
-            let path = unique_path(&out_dir, &dl.name);
-            match std::fs::File::create(&path) {
-                Ok(f) => dl.file = Some((f, path)),
+            match create_unique(&out_dir, &dl.name) {
+                Ok(x) => dl.file = Some(x),
                 Err(e) => {
                     let reason = e.to_string();
                     p.downloads.remove(&id);
@@ -894,19 +927,16 @@ impl Room {
         let Some(dl) = p.downloads.remove(id) else { return };
         let (file, path) = match dl.file {
             Some(x) => x,
-            None => {
-                let path = unique_path(&out_dir, &dl.name);
-                match std::fs::File::create(&path) {
-                    Ok(f) => (f, path),
-                    Err(e) => {
-                        self.emit(Event::FileFailed {
-                            id: id.to_string(),
-                            reason: e.to_string(),
-                        });
-                        return;
-                    }
+            None => match create_unique(&out_dir, &dl.name) {
+                Ok(x) => x,
+                Err(e) => {
+                    self.emit(Event::FileFailed {
+                        id: id.to_string(),
+                        reason: e.to_string(),
+                    });
+                    return;
                 }
-            }
+            },
         };
         drop(file);
         if hex::encode(dl.hasher.finalize()) == dl.sha256 {
@@ -992,7 +1022,7 @@ impl Room {
                 self.send_frame(&tag, lane::CTRL, bye);
             }
         }
-        for (_, (_, _, rtc)) in self.awaiting.drain() {
+        for (_, (_, _, rtc, _)) in self.awaiting.drain() {
             let _ = rtc.send(RtcCmd::Close);
         }
         self.ended = true;
@@ -1008,23 +1038,40 @@ pub fn sanitize_file_name(name: &str) -> String {
         .chars()
         .filter(|c| !matches!(c, ':' | '*' | '?' | '"' | '<' | '>' | '|'))
         .collect();
-    let clean = clean.trim_start_matches('.').to_string();
-    if clean.is_empty() { "file".into() } else { clean }
+    // No leading dot (hidden files), no trailing dot or space (Windows drops them).
+    let clean = clean.trim_start_matches('.').trim_end_matches(['.', ' ']).to_string();
+    if clean.is_empty() {
+        return "file".into();
+    }
+    // Windows device names open the device, not a file, whatever the extension.
+    let stem = clean.split('.').next().unwrap_or("").to_ascii_uppercase();
+    let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || (stem.len() == 4
+            && (stem.starts_with("COM") || stem.starts_with("LPT"))
+            && stem.as_bytes()[3].is_ascii_digit());
+    if reserved { format!("_{clean}") } else { clean }
 }
 
-fn unique_path(dir: &std::path::Path, name: &str) -> PathBuf {
-    let p = dir.join(name);
-    if !p.exists() {
-        return p;
-    }
+/// Creates a new file for `name` in `dir`, as `name (1)`, `name (2)`… when taken. Never opens an
+/// existing path (nor follows a symlink planted there), so a download cannot overwrite anything.
+fn create_unique(dir: &std::path::Path, name: &str) -> std::io::Result<(std::fs::File, PathBuf)> {
     let (stem, ext) = match name.rfind('.') {
         Some(i) if i > 0 => (&name[..i], &name[i..]),
         _ => (name, ""),
     };
-    (1..)
-        .map(|n| dir.join(format!("{stem} ({n}){ext}")))
-        .find(|p| !p.exists())
-        .expect("a free name")
+    for n in 0..10_000 {
+        let path = if n == 0 {
+            dir.join(name)
+        } else {
+            dir.join(format!("{stem} ({n}){ext}"))
+        };
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(f) => return Ok((f, path)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Err(std::io::Error::other("no free file name"))
 }
 
 fn guess_mime(name: &str) -> &'static str {
@@ -1051,15 +1098,31 @@ mod tests {
         assert_eq!(sanitize_file_name(".bashrc"), "bashrc");
         assert_eq!(sanitize_file_name("a:b?.txt"), "ab.txt");
         assert_eq!(sanitize_file_name(""), "file");
+        assert_eq!(sanitize_file_name("nul.txt"), "_nul.txt");
+        assert_eq!(sanitize_file_name("COM1"), "_COM1");
+        assert_eq!(sanitize_file_name("report. . "), "report");
     }
 
     #[test]
-    fn unique_paths() {
+    fn unique_files() {
         let dir = std::env::temp_dir().join(format!("hush-test-{}", new_id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let a = unique_path(&dir, "x.txt");
-        std::fs::write(&a, b"1").unwrap();
-        assert_eq!(unique_path(&dir, "x.txt").file_name().unwrap(), "x (1).txt");
+        let (_, a) = create_unique(&dir, "x.txt").unwrap();
+        assert_eq!(a.file_name().unwrap(), "x.txt");
+        assert_eq!(
+            create_unique(&dir, "x.txt").unwrap().1.file_name().unwrap(),
+            "x (1).txt"
+        );
+        // A symlink planted under the name is not followed.
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(dir.join("target"), dir.join("y.txt")).unwrap();
+            assert_eq!(
+                create_unique(&dir, "y.txt").unwrap().1.file_name().unwrap(),
+                "y (1).txt"
+            );
+            assert!(!dir.join("target").exists());
+        }
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

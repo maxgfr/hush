@@ -7,6 +7,7 @@ use futures_util::{SinkExt, StreamExt};
 use hush_core::envelope::{self, Envelope, PeerTag, ReplayGuard};
 use k256::schnorr::SigningKey;
 use serde_json::{Value, json};
+use sha2::Digest;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -386,8 +387,10 @@ impl Rendezvous {
     pub async fn next(&mut self) -> Option<(ChannelId, Envelope)> {
         loop {
             let (wire, topic) = self.rx.recv().await?;
+            // The whole envelope, hashed: keyed on a prefix, a relay could send a corrupted copy
+            // first and get the genuine one dropped as a duplicate.
             let mut key = topic[..2].to_vec();
-            key.extend_from_slice(&wire.as_bytes()[..wire.len().min(60)]);
+            key.extend_from_slice(&sha2::Sha256::digest(wire.as_bytes())[..16]);
             if !self.seen.insert(key) {
                 continue;
             }

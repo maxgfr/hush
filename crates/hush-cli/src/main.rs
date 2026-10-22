@@ -289,7 +289,8 @@ async fn drive(
                     Event::Path { peer, direct } => eprintln!(
                         "  {} path to {peer}", if direct { "direct" } else { "no direct path, relayed (still end-to-end encrypted)" }),
                     Event::Verified { peer } => eprintln!("  ✓ verified by both sides ({peer})"),
-                    Event::Message { peer, name, text } => println!("{}: {text}", who(&name, &peer)),
+                    // Continuation lines are indented so a message cannot pass for another line.
+                    Event::Message { peer, name, text } => println!("{}: {}", who(&name, &peer), text.replace('\n', "\n    ")),
                     Event::FileOffer { peer, name, id, file, size } => {
                         eprintln!("{} offers {file} ({}) — /get {id}", who(&name, &peer), human(size));
                         if mode == Mode::Receive { downloads += 1; let _ = cmds.send(RoomCmd::Get(id)); }
@@ -400,7 +401,7 @@ fn backup(action: BackupCmd) -> Result<()> {
                 println!(
                     "  {} {}  {}{}",
                     if verified { "✓" } else { "✗" },
-                    c["name"].as_str().unwrap_or("?"),
+                    hush_core::bundle::display_name(c["name"].as_str().unwrap_or("?")),
                     c["id"].as_str().unwrap_or("?"),
                     if kept > 0 {
                         format!("  ({kept} messages kept)")
@@ -504,7 +505,7 @@ async fn main() -> Result<()> {
     };
     let mut opts = opts;
     if let Some(link) = &opts.join {
-        let parsed = hush_core::link::Link::parse(link).map_err(|_| anyhow::anyhow!("not a hush link"))?;
+        let parsed = hush_core::link::Link::parse(link).map_err(util::link_error)?;
         if parsed.passphrase && opts.passphrase.is_none() {
             opts.passphrase = Some(read_secret("this link needs a passphrase")?);
         }
