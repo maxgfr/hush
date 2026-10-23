@@ -136,6 +136,40 @@ The end-to-end test `sw.spec.ts` poisons the cache and checks that the genuine a
 - **L13.** The login is documented as readable by the origin's other pages (SECURITY.md, and the settings screen). It only gives access to that TURN server, which sees nothing but ciphertext. Keeping it in memory only would mean typing it at every visit.
 - **L14.** Whenever a message leaves (deleted, expired, dropped by the limit, or the conversation ends), its file's object URL is revoked, a download under way is dropped, and your own file is no longer offered: a stream already started stops.
 
+## Second review: the phones, nearby links and the shared engine
+
+After the mobile apps, four reviews ran separately: Android, iOS, the web app, and the Rust engine shared by the CLI and the phones (`crates/hush-app`, `crates/hush-ffi`). Each finding was checked against the code with a concrete attack. The two that could be reproduced were reproduced: an engine test, and a Playwright test for S1. Each now has a regression test that fails without its fix.
+
+| # | Severity | Finding | Status |
+|---|---|---|---|
+| S1 | High | A page of the origin could store a redirect around the genuine cached shell: the hash matched, and every hush link was sent, fragment included, to that page | Fixed |
+| E1 | High | Someone nearby with no key could replay a peer's public relay envelope over Bluetooth or Wi-Fi: the engine then sent that peer's session there, where it was dropped | Fixed |
+| E2 | Medium | On a one-to-one link, a second HS2 (another holder of the link) could add a hidden peer | Fixed |
+| E3 | Medium | An identifier's channel has a public key: a flood could fill its replay guard and shut lookups and requests for ten minutes | Fixed |
+| E4 | Medium | A request and its proof of work could be sealed again and again for two days: declining had no lasting effect, and each copy cost a decapsulation and a signature check | Fixed |
+| E5 | Medium | Message and file ids were not tied to their author: a group member could delete others' messages, or swap another member's image | Fixed |
+| E6 | Medium | Received files stayed on the phone after they disappeared, were deleted, or the conversation ended | Fixed |
+| A1 | Medium | Android joined the Wi-Fi Direct group of anyone advertising a copied token, and one claim per token let a copy block the real dial | Fixed |
+| A2 | Medium | Android opened a received file with the type its sender declared (an "invoice.pdf" declared `text/html` opened in a browser) | Fixed |
+| I1 | Medium | iOS decoded received images at full size on the main thread: a 30000×30000 PNG under 8 MB got the app killed | Fixed |
+| E7 | Low–medium | Eight silent connections, reopened as each was closed, kept real peers off the nearby link slots | Fixed |
+| I2 | Low–medium | The iOS privacy shield did not cover sheets or Quick Look in the app switcher's snapshot | Fixed |
+| E8 | Low | A peer asking for one file repeatedly opened it again each time; a full disk saved a truncated file; half-received files stayed | Fixed |
+| E9 | Low | Relays and trackers could send 64 MiB messages, decoded on the engine's thread | Fixed |
+| E10 | Low | A blocking call from inside an app callback aborted the app; a backup could ask for 1 GiB and 16 passes of Argon2 | Fixed |
+| E11 | Low | A card from someone found by identifier was not checked against that identifier; the lookup outlived the conversation | Fixed |
+| M1 | Low | Phones: links from other apps joined without a tap; text could be copied around the sensitive, expiring copy; keyboards learned what was typed; backups took any passphrase; secrets were kept in Android's saved state; no `taskAffinity` | Fixed |
+
+- **S1.** The worker served the cached file's status and headers along with its verified body. It now answers `200` with a type it knows for that file; nothing but the bytes comes from the cache. Test: `sw.spec.ts` stores a 302 and a `Refresh` header around the genuine shell.
+- **E1.** Only an envelope's first arrival binds its sender to a nearby link, so a replay after the relay's copy proves nothing. Handshakes leave WebRTC out only when the message itself came over the link. A peer whose frames come another way is taken off the link. Test: `a_replayed_envelope_draws_no_session`.
+- **E3.** On a channel with a public key, the replay guard forgets its oldest envelope when full instead of refusing new ones (`ReplayGuard::lossy`). Everything that travels there is safe to receive twice: lookups are throttled, requests are read once (E4), handshake replies are tied to a handshake in progress. This is the one exception to F4.
+- **E4.** A request's C1 is remembered for the two days its proof of work stays valid, and checked before anything costly.
+- **E5.** The engine records each id's author. A message or file whose id is taken is dropped, and only its author can delete one. The web app does the same (L10).
+- **E6.** With `discard_files` (the phone apps), the engine deletes a received file when it disappears, when its sender deletes it, and when the conversation ends. The CLI saves files where the user asked and leaves them.
+- **A1.** Dials are claimed per token and device. Wi-Fi Direct is a fallback after 15 s with nothing found over Bluetooth and the local network, one group at a time.
+- **A2.** The type comes from the saved name's extension, from a list of viewable kinds; anything else opens as plain bytes, through a chooser. The engine also auto-downloads only files whose extension is previewable too.
+- **I1.** Images are recognised by their bytes, measured from the header, refused beyond 50 MP or 12000 px a side, and drawn as 1024 px thumbnails off the main thread. Quick Look never opens HTML, SVG or XML.
+
 ## Checked and sound
 
 - **Primitives and versions.**
@@ -170,6 +204,9 @@ The end-to-end test `sw.spec.ts` poisons the cache and checks that the genuine a
 - **Strings from peers** are rendered as text only (no `innerHTML`). Trusted Types and a strict CSP are in place. Downloads are checked against their SHA-256 before they can be opened.
 
 ## Limits that remain (documented in SECURITY.md)
+
+- **Requests by identifier, under a race.** A request or a looked-up bundle travels in an envelope whose sender tag is not authenticated. An observer who seals a copy under its own tag and delivers it first can make that one request or lookup fail. It cannot read or complete it: the reply encapsulates to the real requester's keys. A flood of lookups can also slow down answers (one a second).
+- **Memory.** The Rust engine does not wipe every secret from memory when it is done with it: decrypted vault records, contact secrets and passphrases passed in by the apps.
 
 - **Same origin.** A page of `maxgfr.github.io` that you visit can script a hush tab, and can read and change hush's plain-text settings in `localStorage`: relays, TURN server, display name. None of them protects a message, and a TURN server only ever sees encrypted traffic, but its login is there too: anyone holding it can use that relay. A dedicated origin would remove both.
 - **Contacts' first message.** The payload of a contact handshake's C1 has no forward secrecy (as in Noise's KK). Prekeys are derived from the identity seed, so a stolen seed exposes every C1 sent to it. C1 only carries a name and, for requests, the requester's public bundle.

@@ -88,6 +88,8 @@ Saved contacts were verified when they were saved, and reconnect with a mutually
   - Contacts are saved only after both people compared the emojis. They reconnect with keys only they hold.
   - The first message of a reconnection carries no secret, but it has no forward secrecy: prekeys are derived from the identity seed.
   - People who connected by identifier are authenticated by that identifier, not by emojis.
+- **Requests by identifier** carry no proof of who sent the envelope. Someone watching the relays who wins a race can make one request or lookup fail (never read or complete it), and a flood of lookups slows answers down.
+- **Memory on phones and in the CLI.** The Rust engine does not wipe every secret from memory after use (decrypted vault records, contact secrets, passphrases). Lock the vault and quit the app when that matters.
 - **The libraries.** The `ml-kem`, `ml-dsa` and `x-wing` crates are pure Rust (RustCrypto) and have not been independently audited. The versions used include every published fix. Constant-time behavior is not guaranteed under a JavaScript engine's JIT.
 - **This code has been reviewed by its authors, not independently.** See [docs/AUDIT.md](docs/AUDIT.md) for what was checked, against which literature, and what was fixed.
 
