@@ -210,13 +210,16 @@ export async function loadHistory(key: string): Promise<HistoryEntry[]> {
 
 export async function appendHistory(key: string, entry: HistoryEntry): Promise<void> {
   const list = await loadHistory(key);
+  // Ids are chosen by their sender: one already kept (a peer reusing ours) is not added again.
+  if (list.some((e) => e.id === entry.id)) return;
   list.push(entry);
   await writeRecord("history", key, list.slice(-MAX_HISTORY));
 }
 
-export async function removeHistory(key: string, id: string): Promise<void> {
+/** Forgets a message of ours (`mine`) or of the contact's, never the other side's same id. */
+export async function removeHistory(key: string, id: string, mine: boolean): Promise<void> {
   const list = await loadHistory(key);
-  const kept = list.filter((e) => e.id !== id);
+  const kept = list.filter((e) => !(e.id === id && e.mine === mine));
   if (kept.length !== list.length) await writeRecord("history", key, kept);
 }
 

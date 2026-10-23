@@ -50,6 +50,8 @@ export const defaultTransportFactory: TransportFactory = (
 
 const NETWORK: readonly TransportName[] = ["nostr", "torrent"];
 const DEDUP_MS = 5 * 60_000;
+/** Envelopes remembered for deduplication, however recent. */
+export const MAX_SEEN = 4096;
 
 export interface MuxHandlers {
   onEnvelope(wire: string, topic: Uint8Array, via: TransportName): void;
@@ -93,8 +95,14 @@ export class SignalMux {
     const now = Date.now();
     if (this.seen.has(key)) return;
     this.seen.set(key, now);
-    if (this.seen.size > 2048)
+    if (this.seen.size > MAX_SEEN / 2)
       for (const [k, t] of this.seen) if (now - t > DEDUP_MS) this.seen.delete(k);
+    // Still full of recent ones (a relay can send many at once): the oldest go, a map iterates
+    // in insertion order. A copy of one of them is then stopped by the core's replay guard.
+    for (const k of this.seen.keys()) {
+      if (this.seen.size <= MAX_SEEN) break;
+      this.seen.delete(k);
+    }
     this.handlers.onEnvelope(wire, topic, via);
   }
 

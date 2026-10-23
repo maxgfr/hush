@@ -58,6 +58,14 @@ export interface SignalMessage {
 
 export type WebSocketCtor = new (url: string) => WebSocket;
 
+/**
+ * Longest frame taken from a relay or tracker; anything longer is dropped before it is parsed.
+ * The largest envelope the app seals carries one session frame: at most 256 KiB of plaintext
+ * (the core's `MAX_PLAINTEXT`), Padmé-padded twice (under 4% each at that size), then base64url
+ * encoded: about 372 KB. Handshakes and contact messages are far smaller.
+ */
+export const MAX_FRAME = 512 * 1024;
+
 /** Exponential backoff with jitter, capped at 30 s. */
 export function backoff(attempt: number): number {
   const base = Math.min(30_000, 1000 * 2 ** attempt);

@@ -11,6 +11,7 @@ import {
   aggregateState,
   backoff,
   type EndpointStatus,
+  MAX_FRAME,
   type SignalTransport,
   type TransportHandlers,
   type TransportState,
@@ -139,7 +140,7 @@ export class NostrTransport implements SignalTransport {
   }
 
   private onMessage(r: Relay, data: unknown): void {
-    if (typeof data !== "string") return;
+    if (typeof data !== "string" || data.length > MAX_FRAME) return;
     let msg: unknown;
     try {
       msg = JSON.parse(data);

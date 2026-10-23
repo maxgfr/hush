@@ -59,9 +59,15 @@ export interface ChatHooks {
   onCard?(chat: Chat, peer: PeerConn, card: Uint8Array): void;
   /** A text message was shown (contacts.ts keeps history when asked to). */
   onText?(chat: Chat, item: ChatItem): void;
-  /** A message was deleted, by us or by its sender (kept history must forget it too). */
-  onDelete?(chat: Chat, id: string): void;
+  /**
+   * A message was deleted, by us (`mine`) or by its sender (kept history must forget it too,
+   * and only that author's: ids are chosen by their sender, so a peer can reuse one of ours).
+   */
+  onDelete?(chat: Chat, id: string, mine: boolean): void;
 }
+
+/** Items kept per conversation: beyond it, the oldest go (a peer cannot grow it without bound). */
+export const MAX_ITEMS = 2000;
 
 export interface Pending {
   rtc: RtcLink;
@@ -82,6 +88,8 @@ export abstract class Chat {
   private readonly downloads = new Map<string, Download>();
   /** Downloads asked for before the direct link opened (the offer may come through the relays). */
   private readonly wanted = new Set<FileItem>();
+  /** Files being sent, by peer and id: asking again while one runs does not start another. */
+  private readonly streaming = new Set<string>();
   protected readonly timers: ReturnType<typeof setInterval>[] = [];
   protected finished = false;
 
@@ -243,6 +251,9 @@ export abstract class Chat {
     const now = Date.now();
     switch (m.t) {
       case "msg": {
+        // Ids are the sender's choice: a reused one (ours or anyone's) would let its `del` reach
+        // another message, so the copy is dropped.
+        if (this.has(m.id)) break;
         const item: ChatItem = {
           id: m.id,
           from: peer,
@@ -257,12 +268,12 @@ export abstract class Chat {
         break;
       }
       case "del":
-        if (this.items.value.some((i) => i.id === m.id && i.from === peer)) {
-          this.items.value = this.items.value.filter((i) => !(i.id === m.id && i.from === peer));
-          this.hooks.onDelete?.(this, m.id);
-        }
+        // Only the sender of a message can delete it.
+        if (this.remove((i) => i.id === m.id && i.from === peer))
+          this.hooks.onDelete?.(this, m.id, false);
         break;
       case "file": {
+        if (this.has(m.id)) break;
         const item = newFileItem(m, peer);
         this.push({
           id: m.id,
@@ -286,7 +297,13 @@ export abstract class Chat {
       }
       case "file-get": {
         const file = this.outgoing.get(m.id);
-        if (file) await streamFile(file, m.id, peer).catch(() => {});
+        const key = `${toHex(peer.tag)}/${m.id}`;
+        if (!file || this.streaming.has(key)) break;
+        this.streaming.add(key);
+        // Stops if the file goes meanwhile (deleted, expired, conversation ended).
+        await streamFile(file, m.id, peer, () => this.outgoing.get(m.id) === file)
+          .catch(() => {})
+          .finally(() => this.streaming.delete(key));
         break;
       }
       case "file-cancel":
@@ -308,7 +325,43 @@ export abstract class Chat {
   }
 
   protected push(item: ChatItem): void {
-    this.items.value = [...this.items.value, item];
+    this.setItems([...this.items.value, item]);
+  }
+
+  /** Replaces the list, letting go of the oldest items beyond `MAX_ITEMS`. */
+  protected setItems(items: ChatItem[]): void {
+    const over = items.length - MAX_ITEMS;
+    if (over > 0) for (const i of items.splice(0, over)) this.forget(i);
+    this.items.value = items;
+  }
+
+  private has(id: string): boolean {
+    return this.items.value.some((i) => i.id === id);
+  }
+
+  /** Removes the matching items and their files; false if there were none. */
+  private remove(match: (i: ChatItem) => boolean): boolean {
+    const gone = this.items.value.filter(match);
+    if (gone.length === 0) return false;
+    for (const i of gone) this.forget(i);
+    this.items.value = this.items.value.filter((i) => !match(i));
+    return true;
+  }
+
+  /** Lets go of an item's file: its object URL, our copy to send, a download under way. */
+  private forget(i: ChatItem): void {
+    const f = i.file;
+    if (!f) return;
+    if (f.url.value) URL.revokeObjectURL(f.url.value);
+    f.url.value = null;
+    if (!f.owner) {
+      this.outgoing.delete(f.id);
+      return;
+    }
+    this.wanted.delete(f);
+    const key = `${toHex(f.owner.tag)}/${f.id}`;
+    this.downloads.get(key)?.fail();
+    this.downloads.delete(key);
   }
 
   /** A system line in the conversation (e.g. "Bob is in your contacts."). */
@@ -372,6 +425,8 @@ export abstract class Chat {
       ...(ttl ? { expiresAt: ts + ttl * 1000 } : {}),
     });
     item.sha256 = await hashFile(file);
+    // Deleted, expired or ended while it was being hashed: nothing to keep or offer.
+    if (this.finished || !this.items.value.some((i) => i.file === item)) return;
     item.url.value = URL.createObjectURL(file);
     item.state.value = "sent";
     this.outgoing.set(id, file);
@@ -423,18 +478,15 @@ export abstract class Chat {
 
   /** Deletes one of our messages on every side. */
   async retract(id: string): Promise<void> {
-    this.items.value = this.items.value.filter((i) => !(i.id === id && i.from === null));
-    this.hooks.onDelete?.(this, id);
+    this.remove((i) => i.id === id && i.from === null);
+    this.hooks.onDelete?.(this, id, true);
     const data = encodeJson({ t: "del", id });
     await Promise.all(this.live().map((p) => p.send(Lane.CHAT, data).catch(() => {})));
   }
 
   protected sweep(): void {
     const now = Date.now();
-    const items = this.items.value;
-    if (!items.some((i) => i.expiresAt && i.expiresAt <= now)) return;
-    for (const i of items) if (i.expiresAt && i.expiresAt <= now) revoke(i);
-    this.items.value = items.filter((i) => !i.expiresAt || i.expiresAt > now);
+    this.remove((i) => !!i.expiresAt && i.expiresAt <= now);
   }
 
   /** Ends the conversation for everyone: erases keys, messages and files. */
@@ -449,10 +501,11 @@ export abstract class Chat {
     if (this.finished) return;
     this.finished = true;
     for (const t of this.timers) clearInterval(t);
-    for (const i of this.items.value) revoke(i);
+    for (const i of this.items.value) this.forget(i);
     this.items.value = [];
     this.outgoing.clear();
     this.downloads.clear();
+    this.wanted.clear();
     this.cleanup();
   }
 
@@ -462,9 +515,4 @@ export abstract class Chat {
   hasPeer(tag: Uint8Array): boolean {
     return this.peers.value.some((p) => equalBytes(p.tag, tag));
   }
-}
-
-function revoke(i: ChatItem): void {
-  const url = i.file?.url.value;
-  if (url) URL.revokeObjectURL(url);
 }

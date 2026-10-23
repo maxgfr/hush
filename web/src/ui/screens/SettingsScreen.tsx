@@ -150,6 +150,7 @@ export function SettingsScreen(): JSX.Element {
             value={turn.credential}
             onInput={(e) => setTurn({ ...turn, credential: (e.target as HTMLInputElement).value })}
           />
+          <small class="hint">{t("turnHint")}</small>
         </fieldset>
         <label class="check">
           <input

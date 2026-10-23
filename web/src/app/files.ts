@@ -53,10 +53,16 @@ export function newFileItem(
   };
 }
 
-/** Streams one of our files to a peer that asked for it. */
-export async function streamFile(file: Blob, id: string, peer: PeerConn): Promise<void> {
+/** Streams one of our files to a peer that asked for it, while `keep()` says it still exists. */
+export async function streamFile(
+  file: Blob,
+  id: string,
+  peer: PeerConn,
+  keep: () => boolean = () => true,
+): Promise<void> {
   let index = 0;
   for (let off = 0; off < file.size; off += CHUNK_SIZE) {
+    if (!keep()) return;
     const chunk = new Uint8Array(await file.slice(off, off + CHUNK_SIZE).arrayBuffer());
     await peer.send(Lane.FILE, encodeChunk(id, index++, chunk));
   }

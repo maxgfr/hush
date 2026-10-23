@@ -171,6 +171,8 @@ const fr = {
   trackers: "Trackers WebTorrent",
   stun: "Serveurs STUN",
   turn: "Serveur TURN (facultatif)",
+  turnHint:
+    "Gardé en clair dans ce navigateur, lisible par les autres sites de maxgfr.github.io : choisissez un accès propre à ce relais.",
   relayOnly: "Toujours passer par TURN (masque votre IP à votre correspondant)",
   networkHint:
     "Les relais et trackers ne voient qu'un sujet qui change chaque jour et du chiffré. Ils voient votre adresse IP, comme tout site web.",
@@ -350,6 +352,8 @@ const en: Record<Key, string> = {
   trackers: "WebTorrent trackers",
   stun: "STUN servers",
   turn: "TURN server (optional)",
+  turnHint:
+    "Kept unencrypted in this browser, readable by the other sites of maxgfr.github.io: use a login made for this relay only.",
   relayOnly: "Always go through TURN (hides your IP from the other person)",
   networkHint:
     "Relays and trackers only see a topic that changes daily and ciphertext. They see your IP address, like any website.",

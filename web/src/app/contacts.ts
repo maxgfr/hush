@@ -80,8 +80,15 @@ export class ContactChat extends Chat {
     return this.newRtc();
   }
 
+  /** Kept messages go first; an id already shown (or repeated) is skipped: Preact keys on it. */
   showHistory(items: ChatItem[]): void {
-    this.items.value = [...items, ...this.items.value];
+    const ids = new Set(this.items.value.map((i) => i.id));
+    const past = items.filter((i) => {
+      if (ids.has(i.id)) return false;
+      ids.add(i.id);
+      return true;
+    });
+    this.setItems([...past, ...this.items.value]);
   }
 
   protected cleanup(): void {
@@ -153,9 +160,9 @@ export class Contacts {
         text: item.text ?? "",
       }).catch(() => {});
     },
-    onDelete: (chat, id) => {
+    onDelete: (chat, id, mine) => {
       const key = chat instanceof ContactChat ? chat.contact?.key : undefined;
-      if (key) void removeHistory(key, id).catch(() => {});
+      if (key) void removeHistory(key, id, mine).catch(() => {});
     },
   };
 

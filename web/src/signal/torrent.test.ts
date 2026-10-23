@@ -1,7 +1,9 @@
 import { afterAll, describe, expect, test } from "bun:test";
+import { fakeSockets } from "../../test/fake-socket";
 import { serveApp } from "../../test/serve";
 import { randomBytes } from "../lib/bytes";
 import { infoHash, TorrentTransport } from "./torrent";
+import { MAX_FRAME } from "./types";
 
 const server = serveApp({ port: 0, dir: "/nonexistent" });
 const url = `ws://localhost:${server.port}/tracker`;
@@ -53,5 +55,31 @@ describe("torrent transport", () => {
 
   test("the peer id must be 20 characters", () => {
     expect(() => new TorrentTransport([], "short", { onEnvelope() {}, onStatus() {} })).toThrow();
+  });
+
+  test("a frame longer than any envelope is dropped before it is parsed", async () => {
+    const { WS, sockets } = fakeSockets();
+    const got: string[] = [];
+    const topic = randomBytes(32);
+    const t = new TorrentTransport(
+      ["ws://tracker.invalid"],
+      "a".repeat(20),
+      { onEnvelope: (w) => got.push(w), onStatus() {} },
+      { WebSocket: WS },
+    );
+    t.join(topic);
+    await Promise.resolve();
+    const answer = (sdp: string) =>
+      JSON.stringify({
+        action: "announce",
+        info_hash: infoHash(topic),
+        peer_id: "b".repeat(20),
+        answer: { type: "answer", sdp },
+      });
+    const room = MAX_FRAME - answer("").length;
+    sockets[0]?.onmessage?.({ data: answer("A".repeat(room)) });
+    sockets[0]?.onmessage?.({ data: answer("A".repeat(room + 1)) });
+    expect(got.map((w) => w.length)).toEqual([room]);
+    t.close();
   });
 });

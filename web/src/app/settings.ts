@@ -1,6 +1,8 @@
 /**
- * Preferences (never secrets): which relays, trackers and STUN/TURN servers
- * to use, a display name, the default message timer. Kept in localStorage.
+ * Preferences: which relays, trackers and STUN/TURN servers to use, a display
+ * name, the default message timer. Kept in plain localStorage, which every page
+ * of the origin can read: nothing here protects a message. The one credential,
+ * a TURN login, only lets someone use that relay (the UI says so).
  */
 import { signal } from "@preact/signals";
 import { DEFAULT_STUN } from "../net/peer";

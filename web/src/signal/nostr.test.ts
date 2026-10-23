@@ -1,8 +1,9 @@
 import { afterAll, describe, expect, test } from "bun:test";
+import { fakeSockets } from "../../test/fake-socket";
 import { serveApp } from "../../test/serve";
-import { randomBytes } from "../lib/bytes";
-import { NostrTransport } from "./nostr";
-import type { TransportHandlers } from "./types";
+import { randomBytes, toHex } from "../lib/bytes";
+import { NOSTR_KIND, NostrTransport } from "./nostr";
+import { MAX_FRAME, type TransportHandlers } from "./types";
 
 const server = serveApp({ port: 0, dir: "/nonexistent" });
 const url = `ws://localhost:${server.port}/relay`;
@@ -70,6 +71,30 @@ describe("nostr transport", () => {
     });
     await wait(300);
     expect(states).toContain("error");
+    t.close();
+  });
+
+  test("a frame longer than any envelope is dropped before it is parsed", async () => {
+    const { WS, sockets } = fakeSockets();
+    const got: string[] = [];
+    const topic = randomBytes(32);
+    const t = new NostrTransport(
+      ["ws://relay.invalid"],
+      { onEnvelope: (w) => got.push(w), onStatus() {} },
+      { WebSocket: WS },
+    );
+    t.join(topic);
+    await Promise.resolve();
+    const event = (content: string) =>
+      JSON.stringify([
+        "EVENT",
+        "sub",
+        { kind: NOSTR_KIND, pubkey: "someone", tags: [["t", toHex(topic)]], content },
+      ]);
+    const room = MAX_FRAME - event("").length;
+    sockets[0]?.onmessage?.({ data: event("A".repeat(room)) });
+    sockets[0]?.onmessage?.({ data: event("A".repeat(room + 1)) });
+    expect(got.map((w) => w.length)).toEqual([room]);
     t.close();
   });
 });

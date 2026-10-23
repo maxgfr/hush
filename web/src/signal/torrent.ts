@@ -12,6 +12,7 @@ import {
   aggregateState,
   backoff,
   type EndpointStatus,
+  MAX_FRAME,
   type SignalTransport,
   type TransportHandlers,
   type TransportState,
@@ -135,7 +136,7 @@ export class TorrentTransport implements SignalTransport {
   }
 
   private onMessage(t: Tracker, data: unknown): void {
-    if (typeof data !== "string") return;
+    if (typeof data !== "string" || data.length > MAX_FRAME) return;
     let msg: TrackerMessage;
     try {
       msg = JSON.parse(data) as TrackerMessage;

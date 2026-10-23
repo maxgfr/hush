@@ -70,7 +70,7 @@ Saved contacts were verified when they were saved, and reconnect with a mutually
     - only hush's own pages can switch it to a new version.
   - **Not protected:**
     - such a page, if you visit it, can script a hush tab it opens;
-    - it can change hush's plain-text preferences (relays, TURN server, display name), which never hold secrets.
+    - it can read and change hush's plain-text preferences (relays, TURN server, display name). None of them protects a message, but a TURN server's login is among them: anyone holding it can use that relay. Give hush a login that is good for nothing else.
   - A dedicated domain would remove both.
 - **Endpoints.** Malware, a malicious browser extension, or someone holding your unlocked phone sees what you see.
   - JavaScript strings and the browser's memory cannot be wiped reliably. "End" erases the session keys at once. Leaving the end screen reloads the page to drop the rest, except while the vault is unlocked (to keep contacts reachable): lock it, or close the tab.

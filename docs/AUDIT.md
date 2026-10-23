@@ -44,6 +44,11 @@ An internal review of hush: protocol, Rust core, web app and CLI. Each part was 
 | L8 | Low | CLI downloads could follow a planted symlink or use a Windows device name | Fixed |
 | L9 | Low | Any page of the origin could make the service worker activate an update | Fixed |
 | F7 | Low | The web app keyed the contact handshake with the raw contact secret instead of the key derived from it (`PROTOCOL.md` §6) | Fixed |
+| L10 | Low | In the web app, a peer could reuse the id of one of your messages, then delete yours from kept history | Fixed |
+| L11 | Low | In the web app, a peer could pile up messages and file offers without bound, and have one file streamed many times at once | Fixed |
+| L12 | Low | In the web app, a relay or tracker could grow memory: duplicates were forgotten only by age, frames had no size limit | Fixed |
+| L13 | Low | The web app's TURN login sits in `localStorage`, which SECURITY.md said held no secrets | Documented |
+| L14 | Low | In the web app, deleted, expired or dropped files kept their object URL, and your own stayed downloadable after they disappeared | Fixed |
 
 ### F1: the emojis could be ground (critical)
 
@@ -125,6 +130,11 @@ The end-to-end test `sw.spec.ts` poisons the cache and checks that the genuine a
 - **L8.** The CLI creates downloads with `create_new` and never opens an existing path, which also rules out a planted symlink. Windows device names and trailing dots or spaces are neutralized.
 - **L9.** The service worker only takes `skip-waiting` from pages in its own scope.
 - **F7.** The same contact secret was used directly as the handshake's pre-shared key and as the input that derives the rendezvous keys, against the protocol's own key separation. It was found when the Rust engine (which follows the specification) could not reconnect with a browser. The web app now derives the key as specified; its end-to-end tests run against the Rust engine.
+- **L10.** Message ids are chosen by their sender. The web app drops a message or file whose id is already shown, whoever sent it. Only a message's sender can delete it, and kept history then forgets only that author's entry (`removeHistory(key, id, mine)`). History never stores an id twice. Tests: `chat.test.ts`.
+- **L11.** A conversation keeps its latest 2000 items (`MAX_ITEMS`), as kept history does. A file is streamed to a peer once at a time, however often it is asked for.
+- **L12.** The duplicate filter remembers at most 4096 envelopes, oldest out first; the core's replay guard still refuses a copy. Relay and tracker frames over 512 KiB are dropped before they are parsed (`MAX_FRAME`): the largest envelope, one 256 KiB session frame, is about 372 KB.
+- **L13.** The login is documented as readable by the origin's other pages (SECURITY.md, and the settings screen). It only gives access to that TURN server, which sees nothing but ciphertext. Keeping it in memory only would mean typing it at every visit.
+- **L14.** Whenever a message leaves (deleted, expired, dropped by the limit, or the conversation ends), its file's object URL is revoked, a download under way is dropped, and your own file is no longer offered: a stream already started stops.
 
 ## Checked and sound
 
@@ -161,7 +171,7 @@ The end-to-end test `sw.spec.ts` poisons the cache and checks that the genuine a
 
 ## Limits that remain (documented in SECURITY.md)
 
-- **Same origin.** A page of `maxgfr.github.io` that you visit can script a hush tab, and can change hush's plain-text settings in `localStorage`: relays, TURN server, display name. These settings never hold secrets, and a TURN server only ever sees encrypted traffic. A dedicated origin would remove both.
+- **Same origin.** A page of `maxgfr.github.io` that you visit can script a hush tab, and can read and change hush's plain-text settings in `localStorage`: relays, TURN server, display name. None of them protects a message, and a TURN server only ever sees encrypted traffic, but its login is there too: anyone holding it can use that relay. A dedicated origin would remove both.
 - **Contacts' first message.** The payload of a contact handshake's C1 has no forward secrecy (as in Noise's KK). Prekeys are derived from the identity seed, so a stolen seed exposes every C1 sent to it. C1 only carries a name and, for requests, the requester's public bundle.
 - **Saved contacts reconnect as verified** because they were verified when saved. People who connected by identifier are authenticated by the identifier, which the requester typed and the owner sees.
 - **Bluetooth and Wi-Fi (mobile).**
