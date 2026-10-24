@@ -284,7 +284,7 @@ final class DropModel {
         } catch HushError.Core(name: "Expired") {
             error = "expiredLink"
         } catch {
-            error = "\(error)".contains("not on its servers") ? "dropGone" : "dropFailed"
+            self.error = "\(error)".contains("not on its servers") ? "dropGone" : "dropFailed"
         }
     }
 }
