@@ -155,6 +155,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # Redeploys the web app, so that it shows the version just released.
+      actions: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -176,3 +178,8 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           EXPECTED_VERSION: ${{ needs.version.outputs.version }}
         run: $SEMANTIC_RELEASE
+      # The release commit was pushed with GITHUB_TOKEN, which starts no workflow on its own: the
+      # web app is deployed again from it, by hand.
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref main

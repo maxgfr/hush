@@ -116,6 +116,19 @@ export function Home(): JSX.Element {
         <a href="https://github.com/maxgfr/hush" rel="noopener noreferrer" target="_blank">
           {t("source")}
         </a>
+        {typeof __APP_VERSION__ === "string" && (
+          <>
+            <span aria-hidden="true">·</span>
+            <a
+              href={`https://github.com/maxgfr/hush/releases/tag/cli-v${__APP_VERSION__}`}
+              rel="noopener noreferrer"
+              target="_blank"
+              data-testid="version"
+            >
+              v{__APP_VERSION__}
+            </a>
+          </>
+        )}
       </footer>
     </main>
   );

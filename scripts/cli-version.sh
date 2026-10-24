@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Sets the hush CLI version in crates/hush-cli/Cargo.toml and in the hush-cli entry of
-# Cargo.lock, so that `cargo build --locked` still accepts the lockfile.
+# Sets the hush version in crates/hush-cli/Cargo.toml, in the hush-cli entry of Cargo.lock (so
+# that `cargo build --locked` still accepts the lockfile) and in web/package.json (the version the
+# web app shows).
 # Usage: scripts/cli-version.sh <semver>
 set -euo pipefail
 
@@ -27,4 +28,8 @@ set_version() {
 # The first `version = ...` line of Cargo.toml is the [package] one.
 set_version crates/hush-cli/Cargo.toml ""
 set_version Cargo.lock 'name = "hush-cli"'
-echo "hush CLI version set to $version"
+# The first "version" of package.json is the package's own.
+perl -0pi -e 's/"version": "[^"]*"/"version": "'"$version"'"/' web/package.json
+grep -q "\"version\": \"$version\"" web/package.json ||
+  { echo "no version to update in web/package.json" >&2; exit 1; }
+echo "hush version set to $version"

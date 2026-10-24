@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Commits the bumped crates/hush-cli/Cargo.toml and Cargo.lock to main through the
+# Commits the bumped crates/hush-cli/Cargo.toml, Cargo.lock and web/package.json to main through the
 # GraphQL createCommitOnBranch mutation, so GitHub signs the commit (it shows
 # as Verified), then moves the local checkout onto it. semantic-release tags
 # whatever HEAD is after its prepare step, so the tag lands on this commit.
@@ -16,6 +16,7 @@ trap 'rm -rf "$tmp"' EXIT
 
 base64 < crates/hush-cli/Cargo.toml | tr -d '\n' > "$tmp/toml.b64"
 base64 < Cargo.lock | tr -d '\n' > "$tmp/lock.b64"
+base64 < web/package.json | tr -d '\n' > "$tmp/web.b64"
 
 jq -n \
   --arg repo "$GITHUB_REPOSITORY" \
@@ -23,6 +24,7 @@ jq -n \
   --arg headline "chore(release): cli-v$version" \
   --rawfile toml "$tmp/toml.b64" \
   --rawfile lock "$tmp/lock.b64" \
+  --rawfile web "$tmp/web.b64" \
   '{
     query: "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid url } } }",
     variables: { input: {
@@ -31,7 +33,8 @@ jq -n \
       message: { headline: $headline },
       fileChanges: { additions: [
         { path: "crates/hush-cli/Cargo.toml", contents: $toml },
-        { path: "Cargo.lock", contents: $lock }
+        { path: "Cargo.lock", contents: $lock },
+        { path: "web/package.json", contents: $web }
       ] }
     } }
   }' > "$tmp/body.json"

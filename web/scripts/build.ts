@@ -12,6 +12,8 @@ import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promi
 import { join, relative, resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dir, "..");
+/** The released version (scripts/cli-version.sh sets it), shown in the app. */
+const pkg = JSON.parse(await readFile(join(ROOT, "package.json"), "utf8")) as { version: string };
 
 export const CSP = [
   "default-src 'none'",
@@ -129,6 +131,7 @@ export async function build(opts: BuildOptions = {}): Promise<BuildResult> {
     naming,
     define: {
       __WASM_URL__: JSON.stringify(wasmUrl),
+      __APP_VERSION__: JSON.stringify(pkg.version),
       "process.env.NODE_ENV": JSON.stringify(minify ? "production" : "development"),
     },
   });
