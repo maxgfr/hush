@@ -274,12 +274,16 @@ impl Engine {
             .any(|h| h.key() == key && h.since().elapsed() < PENDING_TIMEOUT)
     }
 
+    /// A conversation with this contact that still reaches them. One whose only path was a nearby
+    /// link that closed, with no network, does not count: they are looked for again, and the new
+    /// handshake replaces it.
     fn connected(&self, key: &str) -> bool {
+        let network = !self.cfg.signal.relays.is_empty() || !self.cfg.signal.trackers.is_empty();
         self.contacts
             .chats
             .get(key)
             .and_then(|c| self.chats.get(c))
-            .is_some_and(Chat::connected)
+            .is_some_and(|c| c.connected() && c.peers.values().any(|p| p.reachable(network)))
     }
 
     pub(crate) fn emit_contacts(&self) {

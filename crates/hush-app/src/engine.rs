@@ -326,6 +326,16 @@ impl Peer {
     pub fn verified(&self) -> bool {
         self.verified_me && self.verified_peer
     }
+
+    /// Whether anything still carries frames to this peer: a nearby link, WebRTC, the relays
+    /// (when we have any), or a path still being set up. A peer whose nearby link closed, with no
+    /// network, is not: it must be found again.
+    pub(crate) fn reachable(&self, network: bool) -> bool {
+        self.local.is_some()
+            || self.rtc_open
+            || (self.relayed && network)
+            || (!self.relayed && self.since.elapsed() < DIRECT_TIMEOUT)
+    }
 }
 
 pub(crate) struct Awaiting {
@@ -2547,7 +2557,6 @@ impl Engine {
     }
 }
 
-/// Files a peer was still sending: half a file is of no use to anyone.
 /// A new file for a download: in its folder when it is part of one, never replacing anything.
 fn save_target(out_dir: &std::path::Path, meta: &FileMeta) -> std::io::Result<(std::fs::File, PathBuf)> {
     match &meta.path {
@@ -2559,6 +2568,7 @@ fn save_target(out_dir: &std::path::Path, meta: &FileMeta) -> std::io::Result<(s
     }
 }
 
+/// Files a peer was still sending: half a file is of no use to anyone.
 fn discard_partial(p: &Peer) {
     for dl in p.downloads.values() {
         if let Some((_, path)) = &dl.file {

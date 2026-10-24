@@ -170,10 +170,21 @@ impl LocalHost for Device {
     }
 
     fn close(&self, link: LinkId) {
-        if let Some((other, theirs)) = self.ends.lock().unwrap().remove(&link) {
+        // The guard must go before the rescan below, which locks every device's ends again.
+        let end = self.ends.lock().unwrap().remove(&link);
+        if let Some((other, theirs)) = end {
             let o = self.air.get(other);
             o.ends.lock().unwrap().remove(&theirs);
             o.app().local(LocalIn::Closed { link: theirs });
+            // A closed link can be dialed again, as a real radio keeps scanning: otherwise two
+            // devices whose link the engine closed would never find each other again.
+            let me = self.index;
+            self.air
+                .linked
+                .lock()
+                .unwrap()
+                .retain(|(s, a, _)| !(*s == me && *a == other || *s == other && *a == me));
+            self.air.rescan();
         }
     }
 }

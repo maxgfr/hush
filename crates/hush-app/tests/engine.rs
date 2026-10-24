@@ -403,14 +403,21 @@ async fn saved_contacts_find_each_other_nearby() {
             matches!(e, Event::ChatEnded { chat, .. } if *chat == cb).then_some(())
         })
         .await;
+    // Nearby off while the links go and what was seen is forgotten: otherwise they could find each
+    // other again in between, and the test would wait for an event it had just thrown away.
+    alice.app.send(Cmd::SetLocal(false));
+    bob.app.send(Cmd::SetLocal(false));
     da.drop_links();
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     alice.ev.clear();
     bob.ev.clear();
+    alice.app.send(Cmd::SetLocal(true));
+    bob.app.send(Cmd::SetLocal(true));
 
     // No link, no network: they find each other as contacts over Bluetooth.
     let chat_a = alice
         .ev
-        .wait("a contact chat", |e| match e {
+        .wait_for("a contact chat", std::time::Duration::from_secs(120), |e| match e {
             Event::ChatOpened {
                 chat,
                 kind: ChatKind::Contact { .. },
