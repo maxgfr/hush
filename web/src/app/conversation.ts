@@ -85,6 +85,18 @@ export class Conversation extends Chat {
     return c;
   }
 
+  /** A link made elsewhere (a drop link): we are its creator, and wait for the other side. */
+  static host(
+    rendezvous: Rendezvous,
+    fragment: string,
+    opts: { passphrase?: string; name: () => string },
+    hooks: ChatHooks = {},
+  ): Conversation {
+    const pass = opts.passphrase ? normalizePassphrase(opts.passphrase) : undefined;
+    const secrets = new (hush().LinkSecrets)(fragment, pass);
+    return new Conversation(fragment, secrets, "creator", rendezvous, opts.name, hooks);
+  }
+
   /** Opens someone's link. Throws `Expired` or `Malformed`; slow with a passphrase (Argon2id). */
   static join(
     rendezvous: Rendezvous,

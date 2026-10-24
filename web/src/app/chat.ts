@@ -7,7 +7,8 @@
  * (then contacts.ts copies them into the encrypted vault).
  */
 import { batch, computed, signal } from "@preact/signals";
-import { type EstablishedResult, Lane } from "../core/wasm";
+import { type EstablishedResult, hush, Lane } from "../core/wasm";
+import type { DropManifest, DropSink, Locator } from "../drop/seal";
 import { equalBytes, fromB64u, toB64u, toHex } from "../lib/bytes";
 import type { RtcLink } from "../net/peer";
 import type { Rendezvous } from "../net/rendezvous";
@@ -33,6 +34,7 @@ import {
   MAX_TEXT,
   newId,
 } from "./protocol";
+import { blossomServers } from "./settings";
 
 export type ChatStatus =
   | "waiting" // nobody else yet
@@ -90,6 +92,13 @@ export abstract class Chat {
   private readonly wanted = new Set<FileItem>();
   /** Files being sent, by peer and id: asking again while one runs does not start another. */
   private readonly streaming = new Set<string>();
+  /** Sealed copies of our files on blob servers (for peers without a direct path), by id. */
+  private readonly dropped = new Map<
+    string,
+    Promise<{ locator: Locator; key: Uint8Array; manifest: DropManifest }>
+  >();
+  /** Theirs, asked for as a sealed copy. */
+  private readonly dropWait = new Map<string, FileItem>();
   protected readonly timers: ReturnType<typeof setInterval>[] = [];
   protected finished = false;
 
@@ -306,10 +315,138 @@ export abstract class Chat {
           .finally(() => this.streaming.delete(key));
         break;
       }
-      case "file-cancel":
+      case "file-cancel": {
         this.downloads.get(`${toHex(peer.tag)}/${m.id}`)?.fail();
+        const waiting = this.dropWait.get(m.id);
+        if (waiting?.owner === peer) {
+          this.dropWait.delete(m.id);
+          waiting.state.value = "failed";
+        }
+        break;
+      }
+      case "file-end": {
+        const mine = this.items.value.find((i) => i.id === m.id && i.from === null)?.file;
+        if (mine) mine.delivered.value = true;
+        break;
+      }
+      case "file-drop-req":
+        await this.sealFor(peer, m.id);
+        break;
+      case "file-drop":
+        await this.fetchSealed(peer, m);
         break;
     }
+  }
+
+  /** A peer without a direct path asks for one of our files: seal it once on the blob servers. */
+  private async sealFor(peer: PeerConn, id: string): Promise<void> {
+    const file = this.outgoing.get(id);
+    const item = this.items.value.find((i) => i.id === id && i.from === null)?.file;
+    const servers = blossomServers();
+    if (!file || !item) return;
+    if (servers.length === 0) {
+      void peer.send(Lane.CHAT, encodeJson({ t: "file-cancel", id })).catch(() => {});
+      return;
+    }
+    let job = this.dropped.get(id);
+    if (!job) {
+      job = (async () => {
+        const { prepare, uploadHeader, uploadSegments } = await import("../drop/seal");
+        const entries = [{ file, path: item.path ?? item.name }];
+        // A one-to-one receiver deletes it once saved; in a group, others may still need it.
+        const p = await prepare(entries, {}, Date.now() + 24 * 3_600_000, !this.group);
+        const locator = await uploadHeader(p, servers);
+        await uploadSegments(p, locator);
+        return { locator, key: p.sealer.key(), manifest: { ...p.manifest, total: file.size } };
+      })();
+      this.dropped.set(id, job);
+      job.catch(() => this.dropped.delete(id));
+    }
+    try {
+      const { locator, key } = await job;
+      if (this.finished) return;
+      await peer.send(
+        Lane.CHAT,
+        encodeJson({
+          t: "file-drop",
+          id,
+          hdr: toB64u(locator.header),
+          srv: locator.servers,
+          k: toB64u(key),
+        }),
+      );
+    } catch {
+      void peer.send(Lane.CHAT, encodeJson({ t: "file-cancel", id })).catch(() => {});
+    }
+  }
+
+  /** Where a peer sealed a file we asked for: fetch it, check it is that file, keep it. */
+  private async fetchSealed(
+    peer: PeerConn,
+    m: { id: string; hdr: string; srv: string[]; k: string },
+  ): Promise<void> {
+    const item = this.dropWait.get(m.id);
+    if (!item || item.owner !== peer) return;
+    this.dropWait.delete(m.id);
+    const { cleanHost } = await import("../drop/blossom");
+    const {
+      deleteDrop,
+      download: downloadDrop,
+      fetchHeader,
+      readManifest,
+    } = await import("../drop/seal");
+    const servers = m.srv.map(cleanHost).filter((h): h is string => !!h);
+    const locator: Locator = { header: fromB64u(m.hdr), servers };
+    try {
+      const header = await fetchHeader(locator);
+      const opener = hush().dropOpenKey(header, fromB64u(m.k), Date.now());
+      const manifest = readManifest(opener);
+      const [f] = manifest.files;
+      if (
+        manifest.files.length !== 1 ||
+        !f ||
+        f.size !== item.size ||
+        toHex(f.sha256) !== item.sha256
+      )
+        throw new Error("not the file that was offered");
+      const parts: Uint8Array[] = [];
+      const sink: DropSink = {
+        begin: async () => {},
+        write: async (d) => {
+          parts.push(d.slice());
+        },
+        end: async () => {},
+        close: async () => {},
+        abort: async () => {
+          parts.length = 0;
+        },
+      };
+      await downloadDrop(opener, locator, sink, (done, total) => {
+        item.progress.value = total ? done / total : 1;
+      });
+      if (this.finished || !this.items.value.some((i) => i.file === item)) return;
+      const type = PREVIEWABLE.test(item.mime) ? item.mime : "application/octet-stream";
+      item.blob = new Blob(parts as BlobPart[], { type });
+      item.url.value = URL.createObjectURL(item.blob);
+      item.state.value = "done";
+      void peer.send(Lane.CHAT, encodeJson({ t: "file-end", id: m.id })).catch(() => {});
+      if (manifest.once) void deleteDrop(manifest, locator).catch(() => {});
+      opener.free();
+    } catch {
+      item.state.value = "failed";
+    }
+  }
+
+  /** Deletes the sealed copies of our files, when the conversation ends. */
+  protected forgetDropped(): void {
+    for (const job of this.dropped.values()) {
+      void job
+        .then(async ({ manifest, locator }) =>
+          (await import("../drop/seal")).deleteDrop(manifest, locator),
+        )
+        .catch(() => {});
+    }
+    this.dropped.clear();
   }
 
   /** A peer's name, made distinct from every other member's (and ours) in a group. */
@@ -354,6 +491,7 @@ export abstract class Chat {
     if (!f) return;
     if (f.url.value) URL.revokeObjectURL(f.url.value);
     f.url.value = null;
+    delete f.blob;
     if (!f.owner) {
       this.outgoing.delete(f.id);
       return;
@@ -400,18 +538,21 @@ export abstract class Chat {
     await Promise.all(this.live().map((p) => p.send(Lane.CHAT, data).catch(() => {})));
   }
 
-  async sendFile(file: File): Promise<void> {
+  /** Offers one of our files; `path` places it in a folder (`album/2024/a.jpg`). */
+  async sendFile(file: File, path?: string): Promise<void> {
     if (this.finished) return;
     const id = newId();
     const ts = Date.now();
     const ttl = this.ttl.value;
+    const name = (path ? path.split("/").pop() : file.name) || file.name || "file";
     const item = newFileItem(
       {
         id,
-        name: file.name || "file",
+        name,
         size: file.size,
         mime: file.type || "application/octet-stream",
         sha256: "",
+        ...(path ? { path } : {}),
       },
       null,
     );
@@ -438,7 +579,7 @@ export abstract class Chat {
     const peer = item.owner;
     if (!peer || item.state.value === "downloading" || item.state.value === "done") return;
     if (!peer.rtc?.isOpen) {
-      if (peer.state.value === "relay") item.state.value = "failed";
+      if (peer.state.value === "relay") this.askSealed(item);
       else this.wanted.add(item);
       return;
     }
@@ -449,6 +590,22 @@ export abstract class Chat {
     }
     this.downloads.set(`${toHex(peer.tag)}/${item.id}`, dl);
     void peer.send(Lane.CHAT, encodeJson({ t: "file-get", id: item.id })).catch(() => dl.fail());
+  }
+
+  /** No direct path to the peer who offered it: ask for a sealed copy on blob servers. */
+  private askSealed(item: FileItem): void {
+    const peer = item.owner;
+    if (!peer || blossomServers().length === 0) {
+      item.state.value = "failed";
+      return;
+    }
+    this.dropWait.set(item.id, item);
+    item.sealed.value = true;
+    item.state.value = "downloading";
+    item.progress.value = 0;
+    void peer.send(Lane.CHAT, encodeJson({ t: "file-drop-req", id: item.id })).catch(() => {
+      item.state.value = "failed";
+    });
   }
 
   /** "The emojis match" (or not: then that session is ended at once). */
@@ -506,6 +663,8 @@ export abstract class Chat {
     this.outgoing.clear();
     this.downloads.clear();
     this.wanted.clear();
+    this.dropWait.clear();
+    this.forgetDropped();
     this.cleanup();
   }
 

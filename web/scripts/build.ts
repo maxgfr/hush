@@ -18,7 +18,8 @@ export const CSP = [
   // The Rust core is WebAssembly; no eval of JavaScript.
   "script-src 'self' 'wasm-unsafe-eval'",
   "style-src 'self'",
-  "connect-src 'self' wss:",
+  // wss: for relays and trackers, https: for the blob servers keeping sealed drops.
+  "connect-src 'self' wss: https:",
   "img-src 'self' blob: data:",
   "worker-src 'self'",
   "manifest-src 'self'",

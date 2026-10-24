@@ -11,6 +11,8 @@ export type {
   ContactInitiatorReady,
   ContactResponder,
   ContactResponderPending,
+  DropOpener,
+  DropSealer,
   Identity,
   LinkCreator,
   LinkCreatorPending,
@@ -69,10 +71,12 @@ export function coreError(e: unknown): CoreError | null {
 // Shapes of the plain objects the core returns.
 
 export interface LinkInfo {
-  mode: "direct" | "group";
+  mode: "direct" | "group" | "drop";
   expiresMs: number;
   passphrase: boolean;
   fragment: string;
+  /** Drop links: where the sealed copy is stored. */
+  locator?: { header: Uint8Array; servers: string[] };
 }
 
 export interface OpenedEnvelope {

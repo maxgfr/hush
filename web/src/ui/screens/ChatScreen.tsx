@@ -6,6 +6,7 @@ import { Conversation } from "../../app/conversation";
 import type { PeerConn } from "../../app/peer";
 import { contactsManager, go, manualOpen, view } from "../../app/state";
 import { vaultState } from "../../app/store";
+import { entriesFromDrop } from "../../drop/entries";
 import { FileCard } from "../components/FileCard";
 import { Icon } from "../components/Icons";
 import { ManualPanel } from "../components/ManualPanel";
@@ -165,6 +166,12 @@ function Composer(props: { chat: Chat }): JSX.Element {
       <textarea
         rows={1}
         value={text}
+        onPaste={(e) => {
+          const files = Array.from(e.clipboardData?.files ?? []);
+          if (files.length === 0) return;
+          e.preventDefault();
+          for (const f of files) void props.chat.sendFile(f);
+        }}
         placeholder={t("messagePlaceholder")}
         aria-label={t("messagePlaceholder")}
         data-testid="composer"
@@ -194,6 +201,7 @@ export function ChatScreen(props: { chat: Chat }): JSX.Element {
   const [menu, setMenu] = useState(false);
   const [inviting, setInviting] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
   const peers = chat.peers.value.filter((p) => p.state.value !== "closed");
   const items = chat.items.value;
   const conv = chat instanceof Conversation ? chat : null;
@@ -233,7 +241,27 @@ export function ChatScreen(props: { chat: Chat }): JSX.Element {
 
   const open = peers.length > 0;
   return (
-    <main class="chat">
+    <main
+      class={`chat${dragging ? " drag-over" : ""}`}
+      onDragOver={(e) => {
+        if (!e.dataTransfer?.types.includes("Files") || chat.isFinished) return;
+        e.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={(e) => {
+        if (e.target === e.currentTarget) setDragging(false);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragging(false);
+        // Folders keep their structure: each file is offered under its relative path.
+        if (e.dataTransfer)
+          void entriesFromDrop(e.dataTransfer).then((entries) => {
+            for (const en of entries)
+              void chat.sendFile(en.file, en.path.includes("/") ? en.path : undefined);
+          });
+      }}
+    >
       <header class="chat-head">
         <button
           type="button"

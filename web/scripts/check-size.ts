@@ -1,6 +1,6 @@
 /**
  * Bundle budget: the JavaScript needed for the first screen (the entry
- * script and everything it imports statically) must stay under 60 KB gzip.
+ * script and everything it imports statically) must stay under 66 KB gzip.
  * Lazily loaded chunks (QR scanner) are reported but not counted. The Rust
  * core (.wasm) has its own budget.
  */
@@ -8,7 +8,9 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { gzipSync } from "node:zlib";
 
-export const BUDGET_GZIP = 60 * 1024;
+// 60 KB until drops: the core's drop bindings (their JavaScript glue cannot load later) and the
+// first screen's drop entry points added about 5 KB; the drop screens and code load on first use.
+export const BUDGET_GZIP = 66 * 1024;
 export const WASM_BUDGET_GZIP = 200 * 1024;
 const DIST = resolve(import.meta.dir, "../dist");
 

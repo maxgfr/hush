@@ -1,13 +1,33 @@
 import type { JSX } from "preact";
+import { useState } from "preact/hooks";
 import { go } from "../../app/state";
 import { contacts, vaultState } from "../../app/store";
+import { entriesFromDrop } from "../../drop/entries";
 import { Icon, Logo } from "../components/Icons";
 import { lang, setLang, t } from "../i18n";
 
 export function Home(): JSX.Element {
   const n = contacts.value.length;
+  const [over, setOver] = useState(false);
   return (
-    <main class="page home">
+    // Files dropped anywhere on the page start a drop.
+    <main
+      class={`page home${over ? " drag-over" : ""}`}
+      onDragOver={(e) => {
+        if (!e.dataTransfer?.types.includes("Files")) return;
+        e.preventDefault();
+        setOver(true);
+      }}
+      onDragLeave={(e) => {
+        if (e.target === e.currentTarget) setOver(false);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        setOver(false);
+        if (e.dataTransfer)
+          void entriesFromDrop(e.dataTransfer).then((entries) => go({ name: "drop", entries }));
+      }}
+    >
       <header class="topbar">
         <div class="brand">
           <Logo size={30} />
@@ -35,12 +55,26 @@ export function Home(): JSX.Element {
             <Icon name="link" />
             {t("newConversation")}
           </button>
+          <button
+            type="button"
+            class="btn btn-large"
+            data-testid="home-send-files"
+            onClick={() => go({ name: "drop" })}
+          >
+            <Icon name="upload" />
+            {t("sendFiles")}
+          </button>
           <button type="button" class="btn btn-large" onClick={() => go({ name: "join" })}>
             <Icon name="scan" />
             {t("joinWithLink")}
           </button>
         </div>
       </section>
+
+      <p class="drop-hint faint">
+        <Icon name="upload" size={16} />
+        {over ? t("dropToSend") : t("sendFilesLead")}
+      </p>
 
       <nav class="tiles" aria-label="hush">
         <button type="button" class="tile" onClick={() => go({ name: "contacts" })}>

@@ -6,6 +6,9 @@ export const DEFAULT_RELAYS = [
   "wss://nostr.mom",
 ];
 
+/** Blossom servers that take anonymous uploads of opaque blobs, with CORS (checked October 2026). */
+export const DEFAULT_BLOSSOM = ["nostr.download", "blossom.yakihonne.com", "files.sovbit.host"];
+
 export const DEFAULT_TRACKERS = [
   "wss://tracker.openwebtorrent.com",
   "wss://tracker.webtorrent.dev",

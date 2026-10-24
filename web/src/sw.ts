@@ -13,6 +13,12 @@
  * file comes from the network. Only the body is taken from the cache: status
  * and headers are set here, since another page could have stored a redirect
  * (which would carry the #link fragment away) around genuine bytes.
+ *
+ * Downloads: a page of hush can hand this worker a stream (a MessagePort) for
+ * a large download; `./__drop/<id>` then answers with it as an attachment, so
+ * the browser writes it to disk as it arrives instead of the page holding it
+ * all in memory. Each id is random, served once, and only hush's own pages may
+ * register one.
  */
 
 // A module: these interfaces stay local rather than merge with the DOM's.
@@ -109,17 +115,73 @@ sw.addEventListener("activate", (e) => {
   );
 });
 
+/** Downloads waiting for the browser to fetch them, by id. */
+const streams = new Map<string, { port: MessagePort; name: string }>();
+
 sw.addEventListener("message", (e) => {
   // Only hush's own pages may switch versions: any page of the origin can post to us.
   const from = (e.source as { url?: string } | null)?.url ?? "";
   if (!from.startsWith(sw.registration.scope)) return;
-  if ((e.data as { type?: string } | null)?.type === "skip-waiting") void sw.skipWaiting();
+  const data = e.data as { type?: string; id?: unknown; name?: unknown } | null;
+  if (data?.type === "skip-waiting") void sw.skipWaiting();
+  const port = e.ports[0];
+  if (
+    data?.type === "drop-stream" &&
+    port &&
+    typeof data.id === "string" &&
+    /^[0-9a-f]{32}$/.test(data.id)
+  ) {
+    const name = typeof data.name === "string" ? data.name.slice(0, 255) : "file";
+    streams.set(data.id, { port, name });
+    // Forgotten if the page never asks for it.
+    setTimeout(() => streams.delete(data.id as string), 60_000);
+    port.postMessage({ ready: true });
+  }
 });
+
+/** The stream registered as `id`, as an attachment, pulled from the page chunk by chunk. */
+function streamed(id: string): Response {
+  const s = streams.get(id);
+  if (!s) return new Response("gone", { status: 404 });
+  streams.delete(id);
+  const { port, name } = s;
+  const body = new ReadableStream<Uint8Array>({
+    pull(ctrl) {
+      return new Promise<void>((resolve) => {
+        port.onmessage = (m) => {
+          const d = m.data as { chunk?: ArrayBuffer; done?: boolean; error?: boolean };
+          if (d.chunk) ctrl.enqueue(new Uint8Array(d.chunk));
+          else if (d.done) ctrl.close();
+          else ctrl.error(new Error("aborted"));
+          resolve();
+        };
+        port.postMessage({ pull: true });
+      });
+    },
+    cancel() {
+      port.postMessage({ cancel: true });
+    },
+  });
+  const safe = name.replace(/["\\\r\n]/g, "_");
+  return new Response(body, {
+    status: 200,
+    headers: {
+      "Content-Type": "application/octet-stream",
+      "Content-Disposition": `attachment; filename="${safe.replace(/[^\x20-\x7e]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(name)}`,
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
+}
 
 sw.addEventListener("fetch", (e) => {
   const req = e.request;
   const url = new URL(req.url);
   if (req.method !== "GET" || url.origin !== sw.location.origin) return;
+  const drop = /\/__drop\/([0-9a-f]{32})$/.exec(url.pathname);
+  if (drop?.[1] && url.href.startsWith(sw.registration.scope)) {
+    e.respondWith(streamed(drop[1]));
+    return;
+  }
   e.respondWith(
     (async () => {
       // Opening a cache creates it: once a tampered one is dropped, stay on the network.

@@ -35,10 +35,16 @@ export type ChatMessage =
       mime: string;
       sha256: string;
       ttl?: number;
+      /** Where it goes in a folder that was sent (`album/2024/a.jpg`), already checked. */
+      path?: string;
     }
   | { t: "file-get"; id: string }
   | { t: "file-end"; id: string }
-  | { t: "file-cancel"; id: string };
+  | { t: "file-cancel"; id: string }
+  /** No direct path: please seal the file on blob servers instead. */
+  | { t: "file-drop-req"; id: string }
+  /** Where the sealed copy waits; `k` (the file key) only ever travels inside the session. */
+  | { t: "file-drop"; id: string; hdr: string; srv: string[]; k: string };
 
 export const MAX_TEXT = 16_000;
 export const MAX_NAME = 64;
@@ -48,6 +54,27 @@ const isStr = (v: unknown, max: number): v is string => typeof v === "string" &&
 const isId = (v: unknown): v is string => typeof v === "string" && /^[A-Za-z0-9_-]{8,32}$/.test(v);
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0;
 const isTtl = (v: unknown) => v === undefined || (isNum(v) && v <= 30 * 86_400);
+const isB64u32 = (v: unknown): v is string =>
+  typeof v === "string" && /^[A-Za-z0-9_-]{43}$/.test(v);
+const isHost = (v: unknown): v is string =>
+  typeof v === "string" && /^[a-z0-9][a-z0-9.:-]{0,252}$/.test(v) && !v.endsWith(".p");
+
+/**
+ * A relative path that is safe to recreate under a download folder (as `drop::valid_path` in
+ * the core): `/`-separated, no empty, `.` or `..` component, no backslash or control character.
+ */
+export function validPath(p: unknown): p is string {
+  return (
+    typeof p === "string" &&
+    p.length > 0 &&
+    new TextEncoder().encode(p).length <= 1024 &&
+    !Array.from(p).some((ch) => {
+      const c = ch.codePointAt(0) ?? 0;
+      return ch === "\\" || c < 0x20 || (c >= 0x7f && c <= 0x9f);
+    }) &&
+    p.split("/").every((c) => c !== "" && c !== "." && c !== "..")
+  );
+}
 
 export const encodeJson = (v: unknown): Uint8Array => utf8(JSON.stringify(v));
 
@@ -139,7 +166,19 @@ export function decodeChat(data: Uint8Array): ChatMessage | null {
         sha256: o.sha256,
       };
       if (o.ttl !== undefined) f.ttl = o.ttl as number;
+      if (o.path !== undefined) {
+        if (!validPath(o.path)) return null;
+        f.path = o.path;
+      }
       return f;
+    }
+    case "file-drop-req":
+      return isId(o.id) ? { t: "file-drop-req", id: o.id } : null;
+    case "file-drop": {
+      if (!isId(o.id) || !isB64u32(o.hdr) || !isB64u32(o.k)) return null;
+      if (!Array.isArray(o.srv) || o.srv.length === 0 || o.srv.length > 4 || !o.srv.every(isHost))
+        return null;
+      return { t: "file-drop", id: o.id, hdr: o.hdr, srv: o.srv as string[], k: o.k };
     }
     case "file-get":
     case "file-end":

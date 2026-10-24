@@ -188,6 +188,16 @@ const fr = {
   unlockedBy: "{name} a déverrouillé le salon.",
   leftSuffix: "est parti",
   mismatchClosed: "Les emojis ne correspondaient pas : connexion fermée.",
+  sendFiles: "Envoyer des fichiers",
+  blobServers: "Serveurs de fichiers (Blossom)",
+  blobOn: "Utiliser des serveurs de fichiers",
+  viaCopy: "via une copie chiffrée",
+  delivered: "livré",
+  dropToSend: "Déposez pour envoyer",
+  sendFilesLead:
+    "Glissez des fichiers ou des dossiers, obtenez un lien. Ils sont chiffrés sur votre appareil avant de partir.",
+  blobServersHint:
+    "Ils gardent les copies chiffrées des fichiers quand personne n'est en ligne. Un hôte par ligne.",
 } as const;
 
 export type Key = keyof typeof fr;
@@ -369,6 +379,15 @@ const en: Record<Key, string> = {
   unlockedBy: "{name} unlocked the room.",
   leftSuffix: "left",
   mismatchClosed: "The emojis did not match: connection closed.",
+  sendFiles: "Send files",
+  blobServers: "File servers (Blossom)",
+  blobOn: "Use file servers",
+  viaCopy: "through a sealed copy",
+  delivered: "delivered",
+  dropToSend: "Drop to send",
+  sendFilesLead:
+    "Drop files or folders, get a link. They are encrypted on your device before they leave.",
+  blobServersHint: "They keep the sealed copies of files when nobody is online. One host per line.",
 };
 
 const dicts = { fr, en } as const;

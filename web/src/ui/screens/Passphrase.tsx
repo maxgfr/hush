@@ -1,17 +1,24 @@
 import type { JSX } from "preact";
 import { useState } from "preact/hooks";
-import { go, joinLink } from "../../app/state";
+import { go, joinLink, openDrop } from "../../app/state";
 import { Icon } from "../components/Icons";
 import { t } from "../i18n";
 
-export function Passphrase(props: { fragment: string; error?: string }): JSX.Element {
+export function Passphrase(props: {
+  fragment: string;
+  error?: string;
+  drop?: boolean;
+}): JSX.Element {
   const [pass, setPass] = useState("");
   const [busy, setBusy] = useState(false);
   const submit = (e: Event) => {
     e.preventDefault();
     if (!pass) return;
     setBusy(true);
-    setTimeout(() => joinLink(props.fragment, pass), 30);
+    setTimeout(
+      () => (props.drop ? void openDrop(props.fragment, pass) : joinLink(props.fragment, pass)),
+      30,
+    );
   };
   return (
     <main class="page narrow">

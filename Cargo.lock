@@ -1384,6 +1384,7 @@ dependencies = [
  "js-sys",
  "rand_core 0.10.1",
  "wasm-bindgen",
+ "zeroize",
 ]
 
 [[package]]

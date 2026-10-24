@@ -16,4 +16,5 @@ hush-core = { path = "../hush-core", default-features = false }
 wasm-bindgen = "=0.2.128"
 js-sys = "0.3"
 rand_core = "=0.10.1"
+zeroize = "=1.9.1"
 getrandom = { version = "=0.4.3", features = ["sys_rng", "wasm_js"] }

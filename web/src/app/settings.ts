@@ -6,7 +6,7 @@
  */
 import { signal } from "@preact/signals";
 import { DEFAULT_STUN } from "../net/peer";
-import { DEFAULT_RELAYS, DEFAULT_TRACKERS } from "../signal/defaults";
+import { DEFAULT_BLOSSOM, DEFAULT_RELAYS, DEFAULT_TRACKERS } from "../signal/defaults";
 import type { SignalConfig } from "../signal/mux";
 
 export interface Settings {
@@ -21,6 +21,10 @@ export interface Settings {
   relayOnly: boolean;
   /** Default disappearing timer for new conversations, in seconds (0 = off). */
   ttl: number;
+  /** Blossom servers keeping sealed copies of files (drops, and files without a direct path). */
+  blossom: string[];
+  /** Off: files only ever travel peer to peer. */
+  blossomOn: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -33,6 +37,8 @@ export const DEFAULT_SETTINGS: Settings = {
   turn: null,
   relayOnly: false,
   ttl: 0,
+  blossom: DEFAULT_BLOSSOM,
+  blossomOn: true,
 };
 
 const KEY = "hush.settings.v1";
@@ -76,7 +82,15 @@ function overrides(s: Settings): Settings {
   if (trackers.length) out.trackers = trackers;
   if (q.has("notracker")) out.torrent = false;
   if (q.has("nostun")) out.stun = [];
+  const blossom = q.getAll("blossom");
+  if (blossom.length) out.blossom = blossom;
   return out;
+}
+
+/** The blob servers to use (empty: none, files only travel peer to peer). */
+export function blossomServers(): string[] {
+  const s = overrides(settings.value);
+  return s.blossomOn ? s.blossom : [];
 }
 
 export function signalConfig(): SignalConfig {

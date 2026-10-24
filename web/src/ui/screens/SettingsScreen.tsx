@@ -2,6 +2,7 @@ import type { JSX } from "preact";
 import { useState } from "preact/hooks";
 import { DEFAULT_SETTINGS, saveSettings, settings } from "../../app/settings";
 import { go, transports } from "../../app/state";
+import { cleanHost } from "../../drop/blossom";
 import { Icon } from "../components/Icons";
 import { lang, setLang, TTL_SECONDS, t, ttlLabel } from "../i18n";
 
@@ -17,6 +18,7 @@ export function SettingsScreen(): JSX.Element {
   const [trackers, setTrackers] = useState(s.trackers.join("\n"));
   const [stun, setStun] = useState(s.stun.join("\n"));
   const [turn, setTurn] = useState(s.turn ?? { url: "", username: "", credential: "" });
+  const [blossom, setBlossom] = useState(s.blossom.join("\n"));
   const [saved, setSaved] = useState(false);
 
   const save = (e: Event) => {
@@ -26,6 +28,10 @@ export function SettingsScreen(): JSX.Element {
       trackers: lines(trackers).filter((u) => /^wss:\/\//.test(u)),
       stun: lines(stun).filter((u) => /^stuns?:/.test(u)),
       turn: turn.url ? turn : null,
+      blossom: lines(blossom)
+        .map(cleanHost)
+        .filter((h): h is string => !!h)
+        .slice(0, 8),
     });
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
@@ -160,6 +166,25 @@ export function SettingsScreen(): JSX.Element {
           />
           <span>{t("relayOnly")}</span>
         </label>
+        <label class="check">
+          <input
+            type="checkbox"
+            checked={s.blossomOn}
+            onChange={(e) => saveSettings({ blossomOn: (e.target as HTMLInputElement).checked })}
+          />
+          <span>{t("blobOn")}</span>
+        </label>
+        <label class="field">
+          <span>{t("blobServers")}</span>
+          <textarea
+            rows={3}
+            value={blossom}
+            spellcheck={false}
+            data-testid="blossom-servers"
+            onInput={(e) => setBlossom((e.target as HTMLTextAreaElement).value)}
+          />
+          <small class="hint">{t("blobServersHint")}</small>
+        </label>
         <div class="row">
           <button type="submit" class="btn btn-primary">
             {saved ? t("saved") : t("save")}
@@ -171,6 +196,7 @@ export function SettingsScreen(): JSX.Element {
               setRelays(DEFAULT_SETTINGS.relays.join("\n"));
               setTrackers(DEFAULT_SETTINGS.trackers.join("\n"));
               setStun(DEFAULT_SETTINGS.stun.join("\n"));
+              setBlossom(DEFAULT_SETTINGS.blossom.join("\n"));
             }}
           >
             {t("reset")}

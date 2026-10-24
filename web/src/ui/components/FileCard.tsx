@@ -22,8 +22,12 @@ export function FileCard(props: { chat: Chat; file: FileItem }): JSX.Element {
       <div class="file-row">
         <Icon name="file" />
         <div class="file-meta">
-          <span class="file-name">{f.name}</span>
-          <span class="faint">{formatSize(f.size)}</span>
+          <span class="file-name">{f.path ?? f.name}</span>
+          <span class="faint">
+            {formatSize(f.size)}
+            {f.sealed.value && ` · ${t("viaCopy")}`}
+            {f.delivered.value && ` · ${t("delivered")} ✓`}
+          </span>
         </div>
         {state === "offered" && (
           <button type="button" class="btn btn-small" onClick={() => props.chat.download(f)}>

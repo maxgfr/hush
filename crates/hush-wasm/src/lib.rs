@@ -9,7 +9,8 @@ use getrandom::SysRng;
 use hush_core::envelope::{self, Envelope, PeerTag, ReplayGuard};
 use hush_core::handshake::{self as hs, ContactParams, Established};
 use hush_core::identity::Identity as CoreIdentity;
-use hush_core::link::{Link, LinkKeys, Mode};
+use hush_core::drop::{self, DropFile, Manifest, Recipient, Unlock};
+use hush_core::link::{Link, LinkKeys, Locator, Mode};
 use hush_core::vault::KdfParams;
 use hush_core::{Error, backup, bundle, contact, id, lookup, pow, sas, session, vault};
 use js_sys::{Array, Object, Reflect, Uint8Array};
@@ -78,16 +79,70 @@ pub fn link_new(group: bool, ttl_min: u32, passphrase: bool, now: f64) -> String
     Link::generate(mode, now_ms(now), u64::from(ttl_min), passphrase, &mut rng()).fragment()
 }
 
-/// `{ mode: "direct" | "group", expiresMs, passphrase, fragment }`, without deriving keys.
+/// `{ mode: "direct" | "group" | "drop", expiresMs, passphrase, fragment, locator? }`, without
+/// deriving keys.
 #[wasm_bindgen(js_name = linkInfo)]
 pub fn link_info(input: &str) -> Result<Object, JsError> {
     let link = Link::parse(input).map_err(err)?;
     let o = Object::new();
-    set(&o, "mode", if link.mode == Mode::Group { "group" } else { "direct" });
+    let mode = match link.mode {
+        Mode::Group => "group",
+        Mode::Direct => "direct",
+        Mode::Drop => "drop",
+    };
+    set(&o, "mode", mode);
     set(&o, "expiresMs", (link.expires_min * 60_000) as f64);
     set(&o, "passphrase", link.passphrase);
     set(&o, "fragment", link.fragment());
+    if let Some(l) = &link.locator {
+        set(&o, "locator", locator_object(l));
+    }
     Ok(o)
+}
+
+fn locator_object(l: &Locator) -> Object {
+    let o = Object::new();
+    set(&o, "header", bytes(&l.header));
+    let servers = Array::new();
+    for h in &l.servers {
+        servers.push(&JsValue::from_str(h));
+    }
+    set(&o, "servers", servers);
+    o
+}
+
+fn locator_from(header: &[u8], servers: &Array) -> Result<Locator, JsError> {
+    let servers: Vec<String> = servers.iter().filter_map(|v| v.as_string()).collect();
+    Locator::new(arr32(header)?, servers).map_err(err)
+}
+
+/// A fresh drop link fragment (without `#`); its locator is added once the header is stored.
+#[wasm_bindgen(js_name = dropLinkNew)]
+pub fn drop_link_new(ttl_min: u32, passphrase: bool, now: f64) -> String {
+    Link::generate(Mode::Drop, now_ms(now), u64::from(ttl_min), passphrase, &mut rng()).fragment()
+}
+
+/// A drop link fragment with where its sealed copy is stored.
+#[wasm_bindgen(js_name = dropLinkWithLocator)]
+pub fn drop_link_with_locator(fragment: &str, header: &[u8], servers: &Array) -> Result<String, JsError> {
+    let mut link = Link::parse(fragment).map_err(err)?;
+    if link.mode != Mode::Drop {
+        return Err(err(Error::InvalidParameter));
+    }
+    link.locator = Some(locator_from(header, servers)?);
+    Ok(link.fragment())
+}
+
+/// The fragment of a drop sealed to identities: it holds no key.
+#[wasm_bindgen(js_name = sealedFragment)]
+pub fn sealed_fragment(header: &[u8], servers: &Array) -> Result<String, JsError> {
+    Ok(locator_from(header, servers)?.sealed_fragment())
+}
+
+/// `{ header, servers }` of a drop sealed to identities (throws `Malformed` for anything else).
+#[wasm_bindgen(js_name = sealedInfo)]
+pub fn sealed_info(input: &str) -> Result<Object, JsError> {
+    Ok(locator_object(&Locator::parse_sealed(input).map_err(err)?))
 }
 
 /// Keys derived from a link (slow with a passphrase: Argon2id, 64 MiB).
@@ -725,4 +780,242 @@ pub fn sas_emojis(indices: &[u8]) -> Array {
         out.push(&pair);
     }
     out
+}
+
+// --------------------------------------------------------------------------------------------
+// Sealed drops
+
+fn get(o: &Object, k: &str) -> JsValue {
+    Reflect::get(o, &JsValue::from_str(k)).unwrap_or(JsValue::UNDEFINED)
+}
+
+fn get_u64(o: &Object, k: &str) -> Result<u64, JsError> {
+    let v = get(o, k).as_f64().ok_or_else(|| err(Error::InvalidParameter))?;
+    if (0.0..=9_007_199_254_740_991.0).contains(&v) {
+        Ok(v as u64)
+    } else {
+        Err(err(Error::InvalidParameter))
+    }
+}
+
+fn get_bytes(o: &Object, k: &str) -> Result<Vec<u8>, JsError> {
+    get(o, k)
+        .dyn_into::<Uint8Array>()
+        .map(|a| a.to_vec())
+        .map_err(|_| err(Error::InvalidParameter))
+}
+
+/// `{ files: [{ path, size, mime, sha256 }], createdMs, expiresMs, once, segments, deleteKey }`
+/// with `sha256` and `deleteKey` 32 bytes each and `segments` every segment hash concatenated.
+fn manifest_from(o: &Object) -> Result<Manifest, JsError> {
+    let files = get(o, "files")
+        .dyn_into::<Array>()
+        .map_err(|_| err(Error::InvalidParameter))?
+        .iter()
+        .map(|f| {
+            let f: Object = f.dyn_into().map_err(|_| err(Error::InvalidParameter))?;
+            Ok(DropFile {
+                path: get(&f, "path").as_string().ok_or_else(|| err(Error::InvalidParameter))?,
+                size: get_u64(&f, "size")?,
+                mime: get(&f, "mime").as_string().unwrap_or_default(),
+                sha256: arr32(&get_bytes(&f, "sha256")?)?,
+            })
+        })
+        .collect::<Result<Vec<_>, JsError>>()?;
+    let segs = get_bytes(o, "segments")?;
+    if segs.len() % 32 != 0 {
+        return Err(err(Error::InvalidParameter));
+    }
+    Ok(Manifest {
+        files,
+        created_ms: get_u64(o, "createdMs")?,
+        expires_ms: get_u64(o, "expiresMs")?,
+        once: get(o, "once").as_bool().unwrap_or(false),
+        segments: segs.chunks(32).map(|c| c.try_into().expect("32 bytes")).collect(),
+        delete_key: arr32(&get_bytes(o, "deleteKey")?)?,
+    })
+}
+
+fn manifest_object(m: &Manifest) -> Object {
+    let o = Object::new();
+    let files = Array::new();
+    for f in &m.files {
+        let x = Object::new();
+        set(&x, "path", f.path.clone());
+        set(&x, "size", f.size as f64);
+        set(&x, "mime", f.mime.clone());
+        set(&x, "sha256", bytes(&f.sha256));
+        files.push(&x);
+    }
+    set(&o, "files", files);
+    set(&o, "createdMs", m.created_ms as f64);
+    set(&o, "expiresMs", m.expires_ms as f64);
+    set(&o, "once", m.once);
+    set(&o, "total", m.total() as f64);
+    set(&o, "segments", bytes(&m.segments.concat()));
+    set(&o, "deleteKey", bytes(&m.delete_key));
+    o
+}
+
+/// Plaintext bytes per segment.
+#[wasm_bindgen(js_name = dropSegmentSize)]
+pub fn drop_segment_size() -> u32 {
+    drop::SEGMENT as u32
+}
+
+/// Whether a relative path may be part of a drop.
+#[wasm_bindgen(js_name = dropValidPath)]
+pub fn drop_valid_path(path: &str) -> bool {
+    drop::valid_path(path)
+}
+
+/// SHA-256, for blob addresses.
+#[wasm_bindgen]
+pub fn sha256(data: &[u8]) -> Vec<u8> {
+    hush_core::kdf::sha256(&[data]).to_vec()
+}
+
+/// Seals one drop. Recipients are added, then segments sealed (twice: once to learn their
+/// addresses, once to upload), then the header built.
+#[wasm_bindgen]
+pub struct DropSealer {
+    inner: drop::Sealer,
+    roots: Vec<zeroize::Zeroizing<[u8; 32]>>,
+    keys: Vec<(Vec<u8>, u32)>,
+}
+
+#[wasm_bindgen]
+impl DropSealer {
+    #[wasm_bindgen(constructor)]
+    pub fn new(total: f64) -> Result<DropSealer, JsError> {
+        if !(total.is_finite() && total >= 0.0) {
+            return Err(err(Error::InvalidParameter));
+        }
+        Ok(Self {
+            inner: drop::Sealer::new(total as u64, &mut rng()).map_err(err)?,
+            roots: Vec::new(),
+            keys: Vec::new(),
+        })
+    }
+
+    #[wasm_bindgen(getter, js_name = segmentCount)]
+    pub fn segment_count(&self) -> u32 {
+        self.inner.segment_count()
+    }
+
+    /// How many stream bytes segment `i` carries.
+    #[wasm_bindgen(js_name = segmentLength)]
+    pub fn segment_length(&self, i: u32) -> u32 {
+        drop::segment_data_len(self.inner.total(), i) as u32
+    }
+
+    #[wasm_bindgen(js_name = sealSegment)]
+    pub fn seal_segment(&self, i: u32, data: &[u8]) -> Result<Vec<u8>, JsError> {
+        self.inner.seal_segment(i, data).map_err(err)
+    }
+
+    /// The SHA-256 of sealed segment `i`, without handing the segment out.
+    #[wasm_bindgen(js_name = segmentHash)]
+    pub fn segment_hash(&self, i: u32, data: &[u8]) -> Result<Vec<u8>, JsError> {
+        Ok(sha256(&self.inner.seal_segment(i, data).map_err(err)?))
+    }
+
+    /// The file key, to send inside an end-to-end session.
+    pub fn key(&self) -> Vec<u8> {
+        self.inner.key().to_vec()
+    }
+
+    /// Whoever holds this drop link (slow with a passphrase: Argon2id).
+    #[wasm_bindgen(js_name = addLink)]
+    pub fn add_link(&mut self, fragment: &str, passphrase: Option<String>) -> Result<(), JsError> {
+        let link = Link::parse(fragment).map_err(err)?;
+        self.roots.push(link.drop_root(passphrase.as_deref()).map_err(err)?);
+        Ok(())
+    }
+
+    /// An identity, by its signed prekey (from its bundle) and the prekey's epoch.
+    #[wasm_bindgen(js_name = addKey)]
+    pub fn add_key(&mut self, ek: &[u8], epoch: u32) {
+        self.keys.push((ek.to_vec(), epoch));
+    }
+
+    fn recipients(&self) -> Vec<Recipient<'_>> {
+        self.roots
+            .iter()
+            .map(|r| Recipient::Secret(r))
+            .chain(self.keys.iter().map(|(ek, epoch)| Recipient::Key { ek, epoch: *epoch }))
+            .collect()
+    }
+
+    pub fn header(&self, manifest: &Object) -> Result<Vec<u8>, JsError> {
+        let m = manifest_from(manifest)?;
+        self.inner.header(&m, &self.recipients(), None, &mut rng()).map_err(err)
+    }
+
+    /// The header, signed by `me`: recipients learn who sent it.
+    #[wasm_bindgen(js_name = headerSigned)]
+    pub fn header_signed(&self, manifest: &Object, me: &Identity) -> Result<Vec<u8>, JsError> {
+        let m = manifest_from(manifest)?;
+        self.inner
+            .header(&m, &self.recipients(), Some(&me.inner), &mut rng())
+            .map_err(err)
+    }
+}
+
+/// An opened drop header.
+#[wasm_bindgen]
+pub struct DropOpener {
+    inner: drop::Opened,
+}
+
+/// Opens a drop header with its link (slow with a passphrase). Throws `Decrypt` for a wrong
+/// passphrase, `Expired` past its expiry.
+#[wasm_bindgen(js_name = dropOpenLink)]
+pub fn drop_open_link(header: &[u8], fragment: &str, passphrase: Option<String>, now: f64) -> Result<DropOpener, JsError> {
+    let link = Link::parse(fragment).map_err(err)?;
+    let root = link.drop_root(passphrase.as_deref()).map_err(err)?;
+    let inner = drop::open_header(header, &Unlock::Secret(&root), now_ms(now)).map_err(err)?;
+    Ok(DropOpener { inner })
+}
+
+/// Opens a drop header sealed to our identity.
+#[wasm_bindgen(js_name = dropOpenIdentity)]
+pub fn drop_open_identity(header: &[u8], me: &Identity, now: f64) -> Result<DropOpener, JsError> {
+    let inner = drop::open_header(header, &Unlock::Identity(&me.inner), now_ms(now)).map_err(err)?;
+    Ok(DropOpener { inner })
+}
+
+/// Opens a drop header with its file key (received inside a session).
+#[wasm_bindgen(js_name = dropOpenKey)]
+pub fn drop_open_key(header: &[u8], key: &[u8], now: f64) -> Result<DropOpener, JsError> {
+    let inner = drop::open_header(header, &Unlock::Key(&arr32(key)?), now_ms(now)).map_err(err)?;
+    Ok(DropOpener { inner })
+}
+
+#[wasm_bindgen]
+impl DropOpener {
+    pub fn manifest(&self) -> Object {
+        manifest_object(&self.inner.manifest)
+    }
+
+    /// The sender's `hush1…` identifier when the drop is signed (the signature verified).
+    #[wasm_bindgen(getter)]
+    pub fn sender(&self) -> Option<String> {
+        self.inner.sender.as_ref().map(|s| s.id())
+    }
+
+    #[wasm_bindgen(getter, js_name = segmentCount)]
+    pub fn segment_count(&self) -> u32 {
+        self.inner.segment_count()
+    }
+
+    /// Checks a stored segment against its address and opens it: its stream bytes.
+    #[wasm_bindgen(js_name = openSegment)]
+    pub fn open_segment(&self, i: u32, ct: &[u8]) -> Result<Vec<u8>, JsError> {
+        self.inner.open_segment(i, ct).map_err(err)
+    }
+
+    pub fn key(&self) -> Vec<u8> {
+        self.inner.key().to_vec()
+    }
 }

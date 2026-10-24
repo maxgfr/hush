@@ -26,6 +26,8 @@ const PATHS = {
   copy: "M9 9h11v11H9z M5 15H4V4h11v1",
   download: "M12 4v12 M7 11l5 5 5-5 M5 20h14",
   file: "M14 3H6v18h12V7z M14 3v4h4",
+  upload: "M12 16V4 M7 9l5-5 5 5 M5 20h14",
+  folder: "M3 6h6l2 2h10v11H3z",
   link: "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1 M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1",
   plus: "M12 5v14 M5 12h14",
   calendar: "M4 6h16v14H4z M4 10h16 M8 3v5 M16 3v5",

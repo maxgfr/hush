@@ -30,6 +30,10 @@ function lazy(load: () => Promise<ComponentType>): () => JSX.Element {
 const ContactsScreen = lazy(() => import("./screens/ContactsScreen").then((m) => m.ContactsScreen));
 const IdentityScreen = lazy(() => import("./screens/IdentityScreen").then((m) => m.IdentityScreen));
 const SettingsScreen = lazy(() => import("./screens/SettingsScreen").then((m) => m.SettingsScreen));
+const DropScreen = lazy(() => import("./screens/DropScreen").then((m) => m.DropScreen));
+const DropReceiveScreen = lazy(() =>
+  import("./screens/DropReceiveScreen").then((m) => m.DropReceiveScreen),
+);
 
 function Screen(): JSX.Element {
   const v = view.value;
@@ -41,7 +45,17 @@ function Screen(): JSX.Element {
     case "join":
       return <Join {...(v.error ? { error: v.error } : {})} />;
     case "passphrase":
-      return <Passphrase fragment={v.fragment} {...(v.error ? { error: v.error } : {})} />;
+      return (
+        <Passphrase
+          fragment={v.fragment}
+          {...(v.error ? { error: v.error } : {})}
+          {...(v.drop ? { drop: true } : {})}
+        />
+      );
+    case "drop":
+      return <DropScreen />;
+    case "dropReceive":
+      return <DropReceiveScreen />;
     case "chat":
       return <ChatScreen chat={v.chat} />;
     case "ended":

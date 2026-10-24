@@ -64,8 +64,11 @@ export function createMockBlossom(): MockBlossom {
       }
       const data = blobs.get(blob);
       if (!data) return new Response("not found", { status: 404 });
-      return new Response(req.method === "HEAD" ? null : data, {
-        headers: { "content-type": "application/octet-stream", "content-length": String(data.length) },
+      return new Response(req.method === "HEAD" ? null : (data as Uint8Array<ArrayBuffer>), {
+        headers: {
+          "content-type": "application/octet-stream",
+          "content-length": String(data.length),
+        },
       });
     },
   };

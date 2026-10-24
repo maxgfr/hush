@@ -24,6 +24,14 @@ export interface FileItem {
   url: Signal<string | null>;
   /** Who offered it (null when it is ours). */
   owner: PeerConn | null;
+  /** Where it goes in a folder that was sent. */
+  path?: string;
+  /** Ours: a peer confirmed it arrived intact. */
+  delivered: Signal<boolean>;
+  /** Theirs: it comes from a sealed copy on blob servers (no direct path). */
+  sealed: Signal<boolean>;
+  /** The verified bytes, once downloaded (a drop saves them without a round trip). */
+  blob?: Blob;
 }
 
 /** Images up to this size are fetched without a click, to show a preview. */
@@ -41,12 +49,19 @@ export async function hashFile(file: Blob): Promise<string> {
 }
 
 export function newFileItem(
-  meta: { id: string; name: string; size: number; mime: string; sha256: string },
+  meta: { id: string; name: string; size: number; mime: string; sha256: string; path?: string },
   owner: PeerConn | null,
 ): FileItem {
   return {
-    ...meta,
+    id: meta.id,
+    name: meta.name,
+    size: meta.size,
+    mime: meta.mime,
+    sha256: meta.sha256,
+    ...(meta.path ? { path: meta.path } : {}),
     owner,
+    delivered: signal(false),
+    sealed: signal(false),
     state: signal<FileState>(owner ? "offered" : "sent"),
     progress: signal(owner ? 0 : 1),
     url: signal<string | null>(null),
@@ -103,6 +118,7 @@ export class Download {
     const type = PREVIEWABLE.test(this.item.mime) ? this.item.mime : "application/octet-stream";
     const blob = new Blob(this.parts as BlobPart[], { type });
     this.parts.length = 0;
+    this.item.blob = blob;
     this.item.url.value = URL.createObjectURL(blob);
     this.item.state.value = "done";
     return true;
@@ -124,4 +140,5 @@ export const fileOffer = (item: FileItem, ts: number, ttl?: number) =>
     mime: item.mime,
     sha256: item.sha256,
     ...(ttl ? { ttl } : {}),
+    ...(item.path?.includes("/") ? { path: item.path } : {}),
   });

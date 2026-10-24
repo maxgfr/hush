@@ -1,11 +1,13 @@
 /** App-wide state: the current screen, the rendezvous, contacts, and starting conversations. */
 import { effect, signal } from "@preact/signals";
 import { coreError, linkInfo, loadCore } from "../core/wasm";
+import type { DropEntry } from "../drop/entries";
 import { Rendezvous } from "../net/rendezvous";
 import type { TransportStatus } from "../signal/types";
 import type { Chat, ChatStatus } from "./chat";
 import { Contacts } from "./contacts";
 import { Conversation } from "./conversation";
+import type { IncomingDrop } from "./drop";
 import { settings, signalConfig } from "./settings";
 import { initStore } from "./store";
 
@@ -13,7 +15,9 @@ export type View =
   | { name: "home" }
   | { name: "new" }
   | { name: "join"; error?: string }
-  | { name: "passphrase"; fragment: string; error?: string }
+  | { name: "passphrase"; fragment: string; error?: string; drop?: boolean }
+  | { name: "drop"; entries?: DropEntry[] }
+  | { name: "dropReceive"; drop: IncomingDrop }
   | { name: "chat"; chat: Chat }
   | { name: "ended"; status: ChatStatus }
   | { name: "contacts" }
@@ -78,7 +82,7 @@ export async function boot(): Promise<void> {
   if (fragment) openLink(fragment);
   window.addEventListener("hashchange", () => {
     const f = takeFragment();
-    if (f && view.value.name !== "chat") openLink(f);
+    if (f && view.value.name !== "chat" && view.value.name !== "dropReceive") openLink(f);
   });
 }
 
@@ -110,7 +114,24 @@ export function startConversation(opts: {
   showChat(conv);
 }
 
+/** Opens a drop (the drop code loads on first use). */
+export async function openDrop(fragment: string, passphrase?: string): Promise<void> {
+  const { IncomingDrop } = await import("./drop");
+  try {
+    const drop = /^\d+\.r\./.test(fragment)
+      ? IncomingDrop.sealed(fragment)
+      : IncomingDrop.link(fragment, passphrase);
+    view.value = { name: "dropReceive", drop };
+  } catch {
+    view.value = { name: "join", error: "invalidLink" };
+  }
+}
+
 export function openLink(input: string): void {
+  if (/^\d+\.r\./.test(input.slice(input.lastIndexOf("#") + 1))) {
+    void openDrop(input.slice(input.lastIndexOf("#") + 1));
+    return;
+  }
   let info: ReturnType<typeof linkInfo>;
   try {
     info = linkInfo(input);
@@ -126,7 +147,11 @@ export function openLink(input: string): void {
     return;
   }
   if (info.passphrase) {
-    view.value = { name: "passphrase", fragment: info.fragment };
+    view.value = { name: "passphrase", fragment: info.fragment, drop: info.mode === "drop" };
+    return;
+  }
+  if (info.mode === "drop") {
+    void openDrop(info.fragment);
     return;
   }
   joinLink(info.fragment);

@@ -985,3 +985,73 @@ fieldset.field input + input {
     transition-duration: 0.01ms;
   }
 }
+
+/* ── drops ─────────────────────────────────────────────────────────────── */
+.dropzone {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 24px 16px;
+  border: 1.5px dashed var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  color: var(--muted);
+  text-align: center;
+  transition:
+    border-color 0.15s var(--ease),
+    background 0.15s var(--ease);
+}
+.dropzone.big {
+  padding: 48px 16px;
+}
+.dropzone p {
+  margin: 0;
+}
+.dropzone.over,
+.drag-over .dropzone {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.drop-list {
+  display: grid;
+  gap: 4px;
+  max-height: 320px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+.drop-list li {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+}
+.drop-list .file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ok-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--ok);
+}
+.drop-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 0;
+  text-align: center;
+}
+.home.drag-over,
+.chat.drag-over {
+  outline: 2px dashed var(--accent);
+  outline-offset: -8px;
+}
