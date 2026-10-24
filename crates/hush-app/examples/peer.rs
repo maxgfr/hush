@@ -38,6 +38,7 @@ async fn main() {
         local: false,
         ttl: 0,
         discard_files: false,
+        blossom: arg(&args, "--blossom").into_iter().collect(),
     };
     let (tx, mut rx) = mpsc::unbounded_channel();
     let app = App::start(cfg, tx, None);

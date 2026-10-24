@@ -4,7 +4,9 @@
 //! `hush-core`; this crate is what `web/src/app` is to the browser.
 
 pub mod api;
+pub mod blossom;
 pub mod contacts;
+pub mod drops;
 pub mod engine;
 pub mod local;
 pub mod proto;

@@ -1,9 +1,11 @@
 /**
- * Static server for dist/ with a mock Nostr relay (/relay) and WebTorrent
- * tracker (/tracker) on the same origin, so the CSP's connect-src 'self'
- * allows them and tests never touch the public network.
+ * Static server for dist/ with a mock Nostr relay (/relay), WebTorrent
+ * tracker (/tracker) and Blossom server (/upload, /<sha256>) on the same
+ * origin, so the CSP's connect-src 'self' allows them and tests never touch
+ * the public network.
  */
 import { join, normalize } from "node:path";
+import { createMockBlossom, type MockBlossom } from "./mock-blossom";
 import { createMockRelay, type MockRelay } from "./mock-relay";
 import { createMockTracker, type MockTracker } from "./mock-tracker";
 
@@ -15,12 +17,14 @@ export interface AppServer {
   port: number;
   relay: MockRelay;
   tracker: MockTracker;
+  blossom: MockBlossom;
   stop(): void;
 }
 
 export function serveApp(opts: { port: number; dir: string }): AppServer {
   const relay = createMockRelay();
   const tracker = createMockTracker();
+  const blossom = createMockBlossom();
   const server = Bun.serve<WsData>({
     port: opts.port,
     async fetch(req, srv) {
@@ -30,6 +34,8 @@ export function serveApp(opts: { port: number; dir: string }): AppServer {
         if (srv.upgrade(req, { data: { kind } })) return undefined;
         return new Response("upgrade required", { status: 426 });
       }
+      const blob = await blossom.handle(req);
+      if (blob) return blob;
       let path = normalize(decodeURIComponent(url.pathname)).replace(/^(\.\.[/\\])+/, "");
       if (path.endsWith("/")) path += "index.html";
       const file = Bun.file(join(opts.dir, path));
@@ -51,11 +57,14 @@ export function serveApp(opts: { port: number; dir: string }): AppServer {
       },
       maxPayloadLength: 1 << 20,
     },
+    // Sealed segments are 4 MiB.
+    maxRequestBodySize: 64 * 1024 * 1024,
   });
   return {
     port: server.port ?? opts.port,
     relay,
     tracker,
+    blossom,
     stop: () => server.stop(true),
   };
 }

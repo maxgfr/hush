@@ -20,7 +20,7 @@ use anyhow::{Result, anyhow, bail};
 use hush_core::bundle::Bundle;
 use hush_core::envelope::{BROADCAST, Envelope, PeerTag, kind};
 use hush_core::handshake::{Established, LinkCreator, LinkCreatorPending, LinkJoiner, LinkJoinerReady};
-use hush_core::link::{Link, LinkKeys, Mode};
+use hush_core::link::{Link, LinkKeys, Locator, Mode};
 use hush_core::session::{Session, lane};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -29,9 +29,11 @@ use tokio::sync::{mpsc, oneshot};
 use crate::api::{
     ChatId, ChatKind, ChatStatus, Config, EndReason, Event, LocalHost, LocalKind, LocalMedium, Notice, PathKind,
 };
+use crate::blossom::Blossom;
 use crate::contacts;
+use crate::drops;
 use crate::local::{self, LocalLink};
-use crate::proto::{self, ChatMsg, Ctrl, FileMeta};
+use crate::proto::{self, ChatMsg, Ctrl, FileDrop, FileMeta};
 use crate::rtc::{self, RtcCmd, RtcEvent, RtcOptions};
 use crate::signal::{Channel, ChannelId, LinkId, Rendezvous, Via};
 use crate::store::{HistoryEntry, Store};
@@ -53,6 +55,9 @@ const AUTO_DOWNLOADS: usize = 3;
 const MAX_UPLOADS: usize = 8;
 /// Frames held for a peer until a path works.
 const MAX_QUEUED_FRAMES: usize = 256;
+/// How long the sealed copy of a file sent in a conversation stays on the blob servers, at most
+/// (it is deleted sooner: by a one-to-one receiver once saved, and by us when the conversation ends).
+const DROP_TTL_MS: u64 = 24 * 3_600_000;
 
 pub(crate) type RtcTx = mpsc::UnboundedSender<RtcCmd>;
 pub(crate) type RtcKey = (ChatId, PeerTag);
@@ -96,6 +101,19 @@ pub enum Cmd {
     SendFile {
         chat: ChatId,
         path: PathBuf,
+    },
+    /// A file of a folder: offered under its relative path (`album/2024/a.jpg`).
+    SendFileAs {
+        chat: ChatId,
+        path: PathBuf,
+        rel: String,
+    },
+    /// Opens a drop link made by the caller (who sealed its files with the same link), as its
+    /// creator: whoever opens it gets the files peer to peer.
+    OpenDrop {
+        link: Link,
+        passphrase: Option<String>,
+        reply: Reply<(ChatId, String)>,
     },
     GetFile {
         chat: ChatId,
@@ -190,6 +208,28 @@ pub(crate) enum Internal {
         key: String,
         nonce: u64,
     },
+    /// A file we sealed on blob servers for peers without a direct path.
+    Dropped {
+        chat: ChatId,
+        id: String,
+        result: Result<DropCopy>,
+    },
+    /// A file a peer sealed for us, downloaded.
+    Fetched {
+        chat: ChatId,
+        tag: PeerTag,
+        id: String,
+        result: Result<PathBuf>,
+    },
+}
+
+/// The sealed copy of one of our files, and what deletes it.
+#[derive(Clone)]
+pub(crate) struct DropCopy {
+    locator: Locator,
+    key: [u8; 32],
+    segments: Vec<[u8; 32]>,
+    delete_key: [u8; 32],
 }
 
 /// A handle on a running engine.
@@ -228,6 +268,8 @@ impl App {
 pub(crate) struct OutFile {
     path: PathBuf,
     size: u64,
+    /// The name it was offered under (with its folders).
+    rel: String,
 }
 
 struct Upload {
@@ -263,6 +305,8 @@ pub(crate) struct Peer {
     downloads: HashMap<String, Download>,
     /// Downloads asked for before a path that carries files opened.
     wanted: Vec<String>,
+    /// Files asked for as a sealed copy, until it is ready (or being fetched).
+    drop_wait: HashMap<String, FileMeta>,
     path: PathKind,
     /// The peer's verified contact card, kept until both sides compared the emojis.
     pub card: Option<Bundle>,
@@ -318,6 +362,9 @@ pub(crate) struct Chat {
     expiry: HashMap<String, u64>,
     /// Where received files were saved.
     received: HashMap<String, PathBuf>,
+    /// Sealed copies of our files, and the peers waiting for one being made.
+    dropped: HashMap<String, DropCopy>,
+    dropping: HashMap<String, Vec<PeerTag>>,
     pub ended: bool,
 }
 
@@ -334,6 +381,8 @@ impl Chat {
             authors: HashMap::new(),
             expiry: HashMap::new(),
             received: HashMap::new(),
+            dropped: HashMap::new(),
+            dropping: HashMap::new(),
             ended: false,
         }
     }
@@ -371,6 +420,7 @@ pub(crate) struct Engine {
     pub(crate) store: Store,
     pub(crate) contacts: contacts::State,
     stopping: Option<Reply<()>>,
+    blossom: Blossom,
 }
 
 impl Engine {
@@ -400,6 +450,7 @@ impl Engine {
             store,
             contacts: contacts::State::default(),
             stopping: None,
+            blossom: Blossom::new(),
         }
     }
 
@@ -480,7 +531,22 @@ impl Engine {
             }
             Cmd::Send { chat, text } => self.send_text(chat, &text),
             Cmd::SendFile { chat, path } => {
-                if let Err(e) = self.offer_file(chat, path) {
+                if let Err(e) = self.offer_file(chat, path, None) {
+                    self.emit(Event::Notice {
+                        chat,
+                        notice: Notice::CannotSend { reason: e.to_string() },
+                    });
+                }
+            }
+            Cmd::OpenDrop {
+                link,
+                passphrase,
+                reply,
+            } => {
+                let _ = reply.send(self.open_created(link, passphrase));
+            }
+            Cmd::SendFileAs { chat, path, rel } => {
+                if let Err(e) = self.offer_file(chat, path, Some(rel)) {
                     self.emit(Event::Notice {
                         chat,
                         notice: Notice::CannotSend { reason: e.to_string() },
@@ -577,6 +643,8 @@ impl Engine {
                 }
             }
             Internal::Pow { key, nonce } => self.request_pow_ready(&key, nonce),
+            Internal::Dropped { chat, id, result } => self.dropped(chat, &id, result),
+            Internal::Fetched { chat, tag, id, result } => self.fetched(chat, &tag, &id, result),
         }
     }
 
@@ -660,6 +728,12 @@ impl Engine {
             pass.is_some(),
             &mut rng(),
         );
+        self.open_created(link, pass)
+    }
+
+    /// Opens a link we made, as its creator.
+    fn open_created(&mut self, link: Link, passphrase: Option<String>) -> Result<(ChatId, String)> {
+        let pass = passphrase.filter(|p| !p.is_empty());
         let keys = link.keys(pass.as_deref()).map_err(|e| anyhow!("{e}"))?;
         let url = link.url(&self.cfg.base);
         let id = self.open_link_chat(keys, true, link.expires_min * 60_000, Some(url.clone()));
@@ -1074,6 +1148,7 @@ impl Engine {
                 offers: HashMap::new(),
                 downloads: HashMap::new(),
                 wanted: Vec::new(),
+                drop_wait: HashMap::new(),
                 path: PathKind::Connecting,
                 card: None,
                 saving: false,
@@ -1337,6 +1412,7 @@ impl Engine {
             discard_partial(p);
         }
         c.peers.clear();
+        let copies: Vec<DropCopy> = c.dropped.drain().map(|(_, v)| v).collect();
         if self.cfg.discard_files {
             for (_, path) in c.received.drain() {
                 let _ = std::fs::remove_file(path);
@@ -1357,6 +1433,9 @@ impl Engine {
             if l.peer.is_some_and(|(c, _)| c == chat) {
                 l.peer = None;
             }
+        }
+        for copy in copies {
+            self.delete_copy(copy);
         }
         self.contacts_chat_ended(chat);
         self.emit(Event::ChatEnded { chat, reason });
@@ -1514,12 +1593,27 @@ impl Engine {
                 }
             }
             ChatMsg::FileGet { id } => self.start_upload(chat, tag, &id),
+            ChatMsg::FileDropReq { id } => self.on_drop_req(chat, tag, &id),
+            ChatMsg::FileDrop(d) => self.on_file_drop(chat, tag, d),
             ChatMsg::FileEnd { id } => {
                 if self.chats.get(&chat).is_some_and(|c| c.outgoing.contains_key(&id)) {
                     self.emit(Event::FileDelivered { chat, id, peer });
                 }
             }
             ChatMsg::FileCancel { id } => {
+                let waited = self
+                    .chats
+                    .get_mut(&chat)
+                    .and_then(|c| c.peers.get_mut(tag))
+                    .and_then(|p| p.drop_wait.remove(&id));
+                if waited.is_some() {
+                    self.emit(Event::FileFailed {
+                        chat,
+                        id,
+                        reason: "the sender could not seal a copy on the blob servers".into(),
+                    });
+                    return;
+                }
                 let removed = self
                     .chats
                     .get_mut(&chat)
@@ -1682,7 +1776,7 @@ impl Engine {
 
     // ── files ───────────────────────────────────────────────────────────────
 
-    fn offer_file(&mut self, chat: ChatId, path: PathBuf) -> Result<()> {
+    fn offer_file(&mut self, chat: ChatId, path: PathBuf, rel: Option<String>) -> Result<()> {
         let Some(c) = self.chats.get(&chat) else {
             bail!("no such conversation")
         };
@@ -1704,16 +1798,24 @@ impl Engine {
             h.update(&buf[..n]);
         }
         let id = new_id();
-        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file").to_string();
+        let rel = rel.filter(|r| hush_core::drop::valid_path(r));
+        let name = match &rel {
+            Some(r) => r.rsplit('/').next().unwrap_or(r).to_string(),
+            None => path.file_name().and_then(|n| n.to_str()).unwrap_or("file").to_string(),
+        };
         let mime = guess_mime(&name);
         let ts = now_ms();
         let mut offer = json!({"t": "file", "id": id, "ts": ts, "name": name, "size": size, "mime": mime, "sha256": hex::encode(h.finalize())});
+        if let Some(r) = rel.filter(|r| r.contains('/')) {
+            offer["path"] = json!(r);
+        }
         let expires_at = (self.cfg.ttl > 0).then(|| {
             offer["ttl"] = json!(self.cfg.ttl);
             ts + self.cfg.ttl * 1000
         });
         if let Some(c) = self.chats.get_mut(&chat) {
-            c.outgoing.insert(id.clone(), OutFile { path, size });
+            let rel = offer["path"].as_str().map_or_else(|| name.clone(), str::to_string);
+            c.outgoing.insert(id.clone(), OutFile { path, size, rel });
             c.authors.insert(id.clone(), None);
         }
         self.broadcast_app(chat, lane::CHAT, &offer);
@@ -1815,12 +1917,213 @@ impl Engine {
             .map(|p| std::mem::take(&mut p.wanted))
             .unwrap_or_default();
         for id in wanted {
-            self.emit(Event::FileFailed {
-                chat,
-                id,
-                reason: "files need a direct connection".into(),
-            });
+            if self.cfg.blossom.is_empty() {
+                self.emit(Event::FileFailed {
+                    chat,
+                    id,
+                    reason: "files need a direct connection".into(),
+                });
+            } else {
+                self.ask_drop(chat, tag, &id);
+            }
         }
+    }
+
+    /// No direct path to the peer that offered `id`: ask it for a sealed copy on blob servers.
+    fn ask_drop(&mut self, chat: ChatId, tag: &PeerTag, id: &str) {
+        let Some(p) = self.chats.get_mut(&chat).and_then(|c| c.peers.get_mut(tag)) else {
+            return;
+        };
+        let Some(meta) = p.offers.remove(id) else { return };
+        let size = meta.size;
+        p.drop_wait.insert(id.to_string(), meta);
+        self.send_app(chat, tag, lane::CHAT, json!({"t": "file-drop-req", "id": id}));
+        self.emit(Event::FileProgress {
+            chat,
+            id: id.to_string(),
+            done: 0,
+            total: size,
+        });
+    }
+
+    /// A peer without a direct path asks for one of our files: seal it on the blob servers (once
+    /// per file, whoever asks), then tell it where.
+    fn on_drop_req(&mut self, chat: ChatId, tag: &PeerTag, id: &str) {
+        let servers = self.cfg.blossom.clone();
+        let Some(c) = self.chats.get_mut(&chat) else { return };
+        let Some(out) = c.outgoing.get(id) else { return };
+        if servers.is_empty() {
+            self.send_app(chat, tag, lane::CHAT, json!({"t": "file-cancel", "id": id}));
+            return;
+        }
+        if let Some(copy) = c.dropped.get(id).cloned() {
+            self.send_drop(chat, tag, id, &copy);
+            return;
+        }
+        if let Some(waiting) = c.dropping.get_mut(id) {
+            if !waiting.contains(tag) {
+                waiting.push(*tag);
+            }
+            return;
+        }
+        c.dropping.insert(id.to_string(), vec![*tag]);
+        // A one-to-one receiver deletes it once saved; in a group, others may still need it.
+        let once = !c.group;
+        let source = drops::Source {
+            path: out.path.clone(),
+            rel: out.rel.clone(),
+            size: out.size,
+        };
+        let expires = now_ms() + DROP_TTL_MS;
+        let (http, tx, id) = (self.blossom.clone(), self.internal_tx.clone(), id.to_string());
+        tokio::spawn(async move {
+            let quiet: drops::Progress = Arc::new(|_, _| {});
+            let result = async {
+                let prepared =
+                    tokio::task::spawn_blocking(move || drops::prepare(vec![source], &[], None, expires, once, &quiet))
+                        .await??;
+                let locator = drops::upload_header(&prepared, &http, &servers).await?;
+                let prepared = Arc::new(prepared);
+                drops::upload_segments(Arc::clone(&prepared), &http, &locator, Arc::new(|_, _| {})).await?;
+                Ok(DropCopy {
+                    locator,
+                    key: *prepared.key(),
+                    segments: prepared.manifest.segments.clone(),
+                    delete_key: prepared.manifest.delete_key,
+                })
+            }
+            .await;
+            let _ = tx.send(Internal::Dropped { chat, id, result });
+        });
+    }
+
+    fn dropped(&mut self, chat: ChatId, id: &str, result: Result<DropCopy>) {
+        let Some(c) = self.chats.get_mut(&chat) else {
+            // The conversation ended meanwhile: nobody will fetch it.
+            if let Ok(copy) = result {
+                self.delete_copy(copy);
+            }
+            return;
+        };
+        let waiting = c.dropping.remove(id).unwrap_or_default();
+        match result {
+            Ok(copy) => {
+                if c.ended {
+                    self.delete_copy(copy);
+                    return;
+                }
+                c.dropped.insert(id.to_string(), copy.clone());
+                for tag in waiting {
+                    self.send_drop(chat, &tag, id, &copy);
+                }
+            }
+            Err(e) => {
+                for tag in waiting {
+                    self.send_app(chat, &tag, lane::CHAT, json!({"t": "file-cancel", "id": id}));
+                }
+                self.emit(Event::Notice {
+                    chat,
+                    notice: Notice::CannotSend {
+                        reason: format!("no blob server took the file: {e}"),
+                    },
+                });
+            }
+        }
+    }
+
+    fn send_drop(&mut self, chat: ChatId, tag: &PeerTag, id: &str, copy: &DropCopy) {
+        let v = json!({"t": "file-drop", "id": id, "hdr": hush_core::b64::encode(&copy.locator.header), "srv": copy.locator.servers, "k": hush_core::b64::encode(&copy.key)});
+        self.send_app(chat, tag, lane::CHAT, v);
+    }
+
+    /// Where a peer sealed a file we asked for: fetch it.
+    fn on_file_drop(&mut self, chat: ChatId, tag: &PeerTag, d: FileDrop) {
+        let out_dir = self.cfg.out_dir.clone();
+        let Some(p) = self.chats.get_mut(&chat).and_then(|c| c.peers.get_mut(tag)) else {
+            return;
+        };
+        let Some(meta) = p.drop_wait.get(&d.id).cloned() else {
+            return;
+        };
+        let (http, tx, events) = (self.blossom.clone(), self.internal_tx.clone(), self.events.clone());
+        let tag = *tag;
+        tokio::spawn(async move {
+            let id = d.id.clone();
+            let result = async {
+                let header = drops::fetch_header(&http, &d.locator).await?;
+                let opened = hush_core::drop::open_header(&header, &hush_core::drop::Unlock::Key(&d.key), now_ms())
+                    .map_err(|e| anyhow!("the sealed copy does not open: {e}"))?;
+                // It must be the file that was offered, and nothing else.
+                if !matches!(opened.manifest.files.as_slice(), [f] if f.size == meta.size && hex::encode(f.sha256) == meta.sha256)
+                {
+                    bail!("the sealed copy is not the file that was offered");
+                }
+                let rel = meta.path.clone().unwrap_or_else(|| meta.name.clone());
+                let progress_id = id.clone();
+                let progress: drops::Progress = Arc::new(move |done, total| {
+                    let _ = events.send(Event::FileProgress {
+                        chat,
+                        id: progress_id.clone(),
+                        done,
+                        total,
+                    });
+                });
+                let saved = drops::download(&opened, &d.locator, &http, &out_dir, progress).await?;
+                let saved = saved.into_iter().next().ok_or_else(|| anyhow!("nothing saved"))?;
+                // Saved under the name that was offered, in its folder.
+                let (dir, name) = drops::folder_for(&out_dir, &rel)?;
+                let path = if saved.parent() == Some(dir.as_path()) && saved.file_name().and_then(|n| n.to_str()) == Some(&name) {
+                    saved
+                } else {
+                    let (_, target) = create_unique(&dir, &name)?;
+                    std::fs::rename(&saved, &target)?;
+                    target
+                };
+                if opened.manifest.once {
+                    drops::delete(&opened, &d.locator, &http).await;
+                }
+                Ok(path)
+            }
+            .await;
+            let _ = tx.send(Internal::Fetched { chat, tag, id, result });
+        });
+    }
+
+    fn fetched(&mut self, chat: ChatId, tag: &PeerTag, id: &str, result: Result<PathBuf>) {
+        if let Some(p) = self.chats.get_mut(&chat).and_then(|c| c.peers.get_mut(tag)) {
+            p.drop_wait.remove(id);
+        }
+        match result {
+            Ok(path) => {
+                if let Some(c) = self.chats.get_mut(&chat) {
+                    c.received.insert(id.to_string(), path.clone());
+                }
+                self.send_app(chat, tag, lane::CHAT, json!({"t": "file-end", "id": id}));
+                self.emit(Event::FileSaved {
+                    chat,
+                    id: id.to_string(),
+                    path,
+                });
+            }
+            Err(e) => self.emit(Event::FileFailed {
+                chat,
+                id: id.to_string(),
+                reason: e.to_string(),
+            }),
+        }
+    }
+
+    /// Deletes a sealed copy of ours from the blob servers, in the background.
+    fn delete_copy(&self, copy: DropCopy) {
+        let http = self.blossom.clone();
+        tokio::spawn(async move {
+            let Ok(sk) = crate::blossom::signing_key(&copy.delete_key) else {
+                return;
+            };
+            for sha in copy.segments.iter().chain([&copy.locator.header]) {
+                http.delete(&copy.locator.servers, sha, &sk).await;
+            }
+        });
     }
 
     fn request_file(&mut self, chat: ChatId, id: &str) {
@@ -1843,7 +2146,9 @@ impl Engine {
                 continue;
             }
             if !local_ok && !p.rtc_open {
-                if p.relayed {
+                if p.relayed && !self.cfg.blossom.is_empty() {
+                    self.ask_drop(chat, &tag, id);
+                } else if p.relayed {
                     self.emit(Event::Notice {
                         chat,
                         notice: Notice::FilesNeedDirect,
@@ -1923,7 +2228,7 @@ impl Engine {
             return;
         }
         if dl.file.is_none() {
-            match create_unique(&out_dir, &sanitize_file_name(&dl.meta.name)) {
+            match save_target(&out_dir, &dl.meta) {
                 Ok(x) => dl.file = Some(x),
                 Err(e) => {
                     p.downloads.remove(&id);
@@ -1979,7 +2284,7 @@ impl Engine {
         };
         let (file, path) = match dl.file {
             Some(x) => x,
-            None => match create_unique(&out_dir, &sanitize_file_name(&dl.meta.name)) {
+            None => match save_target(&out_dir, &dl.meta) {
                 Ok(x) => x,
                 Err(e) => {
                     self.emit(Event::FileFailed {
@@ -2216,6 +2521,17 @@ impl Engine {
 }
 
 /// Files a peer was still sending: half a file is of no use to anyone.
+/// A new file for a download: in its folder when it is part of one, never replacing anything.
+fn save_target(out_dir: &std::path::Path, meta: &FileMeta) -> std::io::Result<(std::fs::File, PathBuf)> {
+    match &meta.path {
+        Some(rel) => {
+            let (dir, name) = drops::folder_for(out_dir, rel).map_err(std::io::Error::other)?;
+            create_unique(&dir, &name)
+        }
+        None => create_unique(out_dir, &sanitize_file_name(&meta.name)),
+    }
+}
+
 fn discard_partial(p: &Peer) {
     for dl in p.downloads.values() {
         if let Some((_, path)) = &dl.file {

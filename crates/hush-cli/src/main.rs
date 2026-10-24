@@ -11,6 +11,8 @@ use std::path::PathBuf;
 use tokio::io::AsyncBufReadExt;
 use tokio::sync::mpsc;
 
+mod sealed;
+
 const DEFAULT_BASE: &str = "https://maxgfr.github.io/hush/";
 const DEFAULT_STUN: [&str; 2] = ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"];
 
@@ -56,30 +58,72 @@ enum Command {
         #[command(flatten)]
         net: NetArgs,
     },
-    /// Send files to whoever opens the link, then exit.
+    /// Send files and folders: prints a link. Whoever opens it gets them peer to peer while you
+    /// are both online, and from a sealed copy on blob servers otherwise.
     Send {
+        /// Files and folders.
         #[arg(required = true)]
         files: Vec<PathBuf>,
-        /// Join this link instead of creating one.
-        #[arg(long)]
+        /// Send them in this conversation link instead (peer to peer).
+        #[arg(long, conflicts_with_all = ["to", "to_self", "p2p_only", "many"])]
         link: Option<String>,
-        #[arg(long, default_value_t = 60)]
+        /// Minutes before the link expires (10 to 10080).
+        #[arg(long, default_value_t = 1440)]
         expires: u64,
+        /// Never store a sealed copy: the link works only while this runs.
+        #[arg(long)]
+        p2p_only: bool,
+        /// Keep the sealed copy after the first download (several people can open the link).
+        #[arg(long)]
+        many: bool,
+        /// Seal to a contact (name or hush1… identifier) instead of a link: only they can open it.
+        /// Repeatable. Needs --identity.
+        #[arg(long)]
+        to: Vec<String>,
+        /// Seal to yourself, to open on another device. Needs --identity.
+        #[arg(long = "self")]
+        to_self: bool,
+        /// Your identity and contacts: a backup made by the app.
+        #[arg(long, env = "HUSH_IDENTITY")]
+        identity: Option<PathBuf>,
+        /// Keep serving peer to peer after the sealed copy is uploaded.
+        #[arg(long)]
+        wait: bool,
         #[command(flatten)]
         net: NetArgs,
     },
-    /// Receive every file sent in a conversation, until the sender ends it.
+    /// Receive files: from a drop link, a drop sealed to you, or a conversation link.
     Receive {
         link: String,
         #[arg(short, long, default_value = ".")]
         out: PathBuf,
+        /// Your identity (a backup made by the app), for a drop sealed to you.
+        #[arg(long, env = "HUSH_IDENTITY")]
+        identity: Option<PathBuf>,
         #[command(flatten)]
         net: NetArgs,
+    },
+    /// Sealed copies on blob servers.
+    Drop {
+        #[command(subcommand)]
+        action: DropCmd,
     },
     /// Encrypted backups made by the web app (or this CLI).
     Backup {
         #[command(subcommand)]
         action: BackupCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum DropCmd {
+    /// Delete a drop from its servers (anyone who can open it can delete it).
+    Rm {
+        link: String,
+        #[arg(long, env = "HUSH_IDENTITY")]
+        identity: Option<PathBuf>,
+        #[arg(long, env = "HUSH_PASSPHRASE")]
+        passphrase: Option<String>,
     },
 }
 
@@ -144,6 +188,12 @@ struct NetArgs {
     /// No relay or tracker at all: the handshake is carried by hand as codes (/code to paste).
     #[arg(long)]
     offline: bool,
+    /// Blossom server keeping sealed copies (repeatable). Defaults to the web app's servers.
+    #[arg(long = "server", env = "HUSH_BLOSSOM", value_delimiter = ',')]
+    servers: Vec<String>,
+    /// No blob server at all: files only travel peer to peer.
+    #[arg(long)]
+    no_servers: bool,
     /// Base URL of the web app, for printed links.
     #[arg(long, default_value = DEFAULT_BASE)]
     base: String,
@@ -204,6 +254,16 @@ impl NetArgs {
             ttl: self.ttl.min(30 * 86_400),
             // Saved where the user asked: theirs to keep.
             discard_files: false,
+            blossom: if self.no_servers || self.offline {
+                vec![]
+            } else if self.servers.is_empty() {
+                hush_app::blossom::DEFAULT_SERVERS
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect()
+            } else {
+                self.servers.iter().map(|s| s.trim().to_ascii_lowercase()).collect()
+            },
         }
     }
 
@@ -217,7 +277,7 @@ impl NetArgs {
     }
 }
 
-fn print_qr(text: &str) {
+pub(crate) fn print_qr(text: &str) {
     if let Ok(code) = qrcode::QrCode::new(text.as_bytes()) {
         let s = code
             .render::<qrcode::render::unicode::Dense1x2>()
@@ -229,7 +289,7 @@ fn print_qr(text: &str) {
     }
 }
 
-fn human(n: u64) -> String {
+pub(crate) fn human(n: u64) -> String {
     match n {
         n if n < 1024 => format!("{n} B"),
         n if n < 1 << 20 => format!("{:.1} KB", n as f64 / 1024.0),
@@ -281,7 +341,7 @@ async fn drive(
     chat: ChatId,
     mode: Mode,
     offline: bool,
-    files: Vec<PathBuf>,
+    files: Vec<hush_app::drops::Source>,
     mut events: mpsc::UnboundedReceiver<Event>,
 ) -> Result<EndReason> {
     let mut pending_files = files.len();
@@ -320,7 +380,7 @@ async fn drive(
                         }
                         if mode == Mode::Send && !offered {
                             offered = true;
-                            for f in &files { app.send(Cmd::SendFile { chat, path: f.clone() }); }
+                            for f in &files { app.send(Cmd::SendFileAs { chat, path: f.path.clone(), rel: f.rel.clone() }); }
                         }
                     }
                     Event::PeerRenamed { peer, name, .. } => { names.insert(peer, name); }
@@ -401,7 +461,7 @@ async fn drive(
     }
 }
 
-fn read_secret(prompt: &str) -> Result<String> {
+pub(crate) fn read_secret(prompt: &str) -> Result<String> {
     eprint!("{prompt}: ");
     std::io::stderr().flush()?;
     let mut s = String::new();
@@ -526,27 +586,77 @@ async fn main() -> Result<()> {
             net.offline,
             vec![],
         ),
+        Command::Drop {
+            action:
+                DropCmd::Rm {
+                    link,
+                    identity,
+                    passphrase,
+                },
+        } => return sealed::remove(&link, identity, passphrase).await,
+        Command::Send {
+            files,
+            link: None,
+            expires,
+            p2p_only,
+            many,
+            to,
+            to_self,
+            identity,
+            wait,
+            net,
+        } if !net.offline => {
+            let cfg = net.config(PathBuf::from("."));
+            let opts = sealed::SendOpts {
+                files,
+                expires_min: expires,
+                p2p_only: p2p_only || cfg.blossom.is_empty() && to.is_empty() && !to_self,
+                many,
+                to,
+                to_self,
+                identity,
+                wait,
+                passphrase: net.passphrase.clone(),
+            };
+            sealed::send(cfg, opts).await?;
+            std::process::exit(0);
+        }
         Command::Send {
             files,
             link,
             expires,
             net,
+            ..
+        } => (
+            Mode::Send,
+            net.config(PathBuf::from(".")),
+            net.target(link, false, expires.min(7 * 24 * 60)),
+            net.offline,
+            hush_app::drops::collect(&files)?,
+        ),
+        Command::Receive {
+            link,
+            out,
+            identity,
+            net,
         } => {
-            for f in &files {
-                if !f.is_file() {
-                    bail!("{} is not a file", f.display());
-                }
-            }
-            (
-                Mode::Send,
-                net.config(PathBuf::from(".")),
-                net.target(link, false, expires),
-                net.offline,
-                files,
-            )
-        }
-        Command::Receive { link, out, net } => {
             std::fs::create_dir_all(&out)?;
+            if let Ok(locator) = hush_core::link::Locator::parse_sealed(&link) {
+                sealed::receive_sealed(locator, identity, out).await?;
+                std::process::exit(0);
+            }
+            if let Ok(parsed) = hush_core::link::Link::parse(&link)
+                && parsed.mode == hush_core::link::Mode::Drop
+                && !net.offline
+            {
+                let pass = match (parsed.passphrase, net.passphrase.clone().filter(|p| !p.is_empty())) {
+                    (true, None) => Some(read_secret("this link needs a passphrase")?),
+                    (true, p) => p,
+                    (false, _) => None,
+                };
+                sealed::receive_link(net.config(out), link, parsed, pass).await?;
+                std::process::exit(0);
+            }
             (
                 Mode::Receive,
                 net.config(out),

@@ -86,16 +86,44 @@ pub struct FileMeta {
     pub mime: String,
     pub sha256: String,
     pub ttl: Option<u64>,
+    /// Where the file goes inside a folder that was sent (`album/2024/a.jpg`), already checked.
+    pub path: Option<String>,
+}
+
+/// Where a file waits, sealed, when no direct path carries it (`file-drop`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileDrop {
+    pub id: String,
+    pub locator: hush_core::link::Locator,
+    /// The drop's file key: it only ever travels inside the session.
+    pub key: [u8; 32],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChatMsg {
-    Msg { id: String, text: String, ttl: Option<u64> },
-    Del { id: String },
+    Msg {
+        id: String,
+        text: String,
+        ttl: Option<u64>,
+    },
+    Del {
+        id: String,
+    },
     File(FileMeta),
-    FileGet { id: String },
-    FileEnd { id: String },
-    FileCancel { id: String },
+    FileGet {
+        id: String,
+    },
+    FileEnd {
+        id: String,
+    },
+    FileCancel {
+        id: String,
+    },
+    /// No direct path: please seal the file on blob servers instead.
+    FileDropReq {
+        id: String,
+    },
+    FileDrop(FileDrop),
 }
 
 fn is_mime(s: &str) -> bool {
@@ -138,11 +166,30 @@ pub fn parse_chat(b: &[u8]) -> Option<ChatMsg> {
                 },
                 sha256: sha.to_string(),
                 ttl: ttl(&v["ttl"])?,
+                path: match &v["path"] {
+                    Value::Null => None,
+                    p => Some(p.as_str().filter(|p| hush_core::drop::valid_path(p))?.to_string()),
+                },
             }))
         }
         "file-get" => Some(ChatMsg::FileGet { id: id()? }),
         "file-end" => Some(ChatMsg::FileEnd { id: id()? }),
         "file-cancel" => Some(ChatMsg::FileCancel { id: id()? }),
+        "file-drop-req" => Some(ChatMsg::FileDropReq { id: id()? }),
+        "file-drop" => {
+            let header = hush_core::b64::decode_array(v["hdr"].as_str()?).ok()?;
+            let key = hush_core::b64::decode_array(v["k"].as_str()?).ok()?;
+            let servers = v["srv"]
+                .as_array()?
+                .iter()
+                .map(|s| s.as_str().map(str::to_string))
+                .collect::<Option<Vec<_>>>()?;
+            Some(ChatMsg::FileDrop(FileDrop {
+                id: id()?,
+                locator: hush_core::link::Locator::new(header, servers).ok()?,
+                key,
+            }))
+        }
         _ => None,
     }
 }
@@ -204,6 +251,24 @@ mod tests {
         let h = parse_hello(br#"{"v":1,"name":"x","sdp":"s"}"#).unwrap();
         assert_eq!(h.sdp.as_deref(), Some("s"));
         assert!(parse_hello(br#"{"v":2}"#).is_none());
+        let p = parse_chat(
+            br#"{"t":"file","id":"abcdefgh12345678","ts":1,"name":"a.jpg","size":3,"mime":"image/jpeg","sha256":"0000000000000000000000000000000000000000000000000000000000000000","path":"album/a.jpg"}"#,
+        );
+        assert!(matches!(p, Some(ChatMsg::File(FileMeta { path: Some(ref p), .. })) if p == "album/a.jpg"));
+        assert!(parse_chat(
+            br#"{"t":"file","id":"abcdefgh12345678","ts":1,"name":"a","size":3,"mime":"x/y","sha256":"0000000000000000000000000000000000000000000000000000000000000000","path":"../a"}"#
+        )
+        .is_none());
+        let d = format!(
+            r#"{{"t":"file-drop","id":"abcdefgh12345678","hdr":"{}","srv":["nostr.download"],"k":"{}"}}"#,
+            hush_core::b64::encode(&[1; 32]),
+            hush_core::b64::encode(&[2; 32])
+        );
+        let Some(ChatMsg::FileDrop(d)) = parse_chat(d.as_bytes()) else {
+            panic!()
+        };
+        assert_eq!(d.locator.servers, ["nostr.download"]);
+        assert!(parse_chat(br#"{"t":"file-drop","id":"abcdefgh12345678","hdr":"x","srv":[],"k":"y"}"#).is_none());
         let c = chunk("abcdefgh12345678", 7, b"data");
         assert_eq!(parse_chunk(&c), Some(("abcdefgh12345678".into(), 7, &b"data"[..])));
     }

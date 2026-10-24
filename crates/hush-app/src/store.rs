@@ -63,6 +63,32 @@ struct Snapshot {
     history: std::collections::BTreeMap<String, Vec<HistoryEntry>>,
 }
 
+/// What a backup gives without a vault: our identity, and the contacts whose bundle verifies.
+pub type BackupKeys = (Option<Identity>, Vec<(Contact, Bundle)>);
+
+/// Reads a backup without a vault (the CLI). Fails with "Decrypt" for a wrong passphrase.
+pub fn read_backup(file: &[u8], passphrase: &str) -> Result<BackupKeys> {
+    let plain = hush_core::backup::import(passphrase, file).map_err(|e| anyhow!("{e:?}"))?;
+    let snap: Snapshot = serde_json::from_slice(&plain).map_err(|_| anyhow!("Malformed"))?;
+    if snap.v != 1 {
+        bail!("Malformed");
+    }
+    let me = snap
+        .identity
+        .and_then(|me| from_b64u(&me.seed))
+        .and_then(|s| <[u8; 32]>::try_from(s.as_slice()).ok())
+        .map(Identity::from_seed);
+    let contacts = snap
+        .contacts
+        .into_iter()
+        .filter_map(|c| {
+            let b = from_b64u(&c.bundle).and_then(|b| Bundle::parse_stored(&b).ok())?;
+            (b.identity.id() == c.id).then_some((c, b))
+        })
+        .collect();
+    Ok((me, contacts))
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VaultState {
     /// No directory to keep anything in, or no vault created.

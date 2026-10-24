@@ -621,6 +621,10 @@ impl HushApp {
             ttl: config.ttl,
             // The app keeps received files in its own storage: gone with the message.
             discard_files: true,
+            blossom: hush_app::blossom::DEFAULT_SERVERS
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
         };
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Event>();
         let host = local.map(|l| Arc::new(Host(l)) as Arc<dyn LocalHost>);

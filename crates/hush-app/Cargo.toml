@@ -19,6 +19,8 @@ bytes = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util"] }
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3"
+# Blossom blob servers (sealed drops). ring and webpki-roots, as for the WebSocket transports.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots", "http2"] }
 k256 = { version = "0.13", features = ["schnorr"] }
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }

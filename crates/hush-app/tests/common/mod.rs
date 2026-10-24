@@ -30,6 +30,7 @@ pub fn config(name: &str, out: PathBuf, data: Option<PathBuf>, relays: Vec<Strin
         local: true,
         ttl: 0,
         discard_files: false,
+        blossom: vec![],
     }
 }
 
@@ -286,4 +287,116 @@ pub async fn relay_with_tap() -> (String, mpsc::UnboundedReceiver<(String, Strin
         }
     });
     (format!("ws://{addr}"), tapped)
+}
+
+/// A minimal Blossom server on localhost (BUD-01/02: PUT /upload, GET, HEAD and DELETE /<sha256>),
+/// checking that uploads carry a signed authorization for the blob.
+#[derive(Default)]
+pub struct MockBlossom {
+    pub blobs: Mutex<HashMap<String, Vec<u8>>>,
+    /// Refuse everything (a server that went away).
+    pub down: std::sync::atomic::AtomicBool,
+    pub uploads: AtomicU64,
+}
+
+pub async fn blossom() -> (String, Arc<MockBlossom>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let host = format!("127.0.0.1:{}", listener.local_addr().unwrap().port());
+    let state = Arc::new(MockBlossom::default());
+    let st = Arc::clone(&state);
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut sock, _)) = listener.accept().await else {
+                return;
+            };
+            let st = Arc::clone(&st);
+            tokio::spawn(async move {
+                let mut buf = Vec::new();
+                let mut tmp = [0u8; 65536];
+                let head_end = loop {
+                    let Ok(n) = sock.read(&mut tmp).await else { return };
+                    if n == 0 {
+                        return;
+                    }
+                    buf.extend_from_slice(&tmp[..n]);
+                    if let Some(i) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                        break i + 4;
+                    }
+                };
+                let head = String::from_utf8_lossy(&buf[..head_end]).to_string();
+                let mut lines = head.lines();
+                let mut first = lines.next().unwrap_or("").split(' ');
+                let (method, path) = (first.next().unwrap_or(""), first.next().unwrap_or("").to_string());
+                let headers: HashMap<String, String> = lines
+                    .filter_map(|l| l.split_once(':'))
+                    .map(|(k, v)| (k.trim().to_ascii_lowercase(), v.trim().to_string()))
+                    .collect();
+                let len: usize = headers.get("content-length").and_then(|v| v.parse().ok()).unwrap_or(0);
+                while buf.len() < head_end + len {
+                    let Ok(n) = sock.read(&mut tmp).await else { return };
+                    if n == 0 {
+                        return;
+                    }
+                    buf.extend_from_slice(&tmp[..n]);
+                }
+                let body = buf[head_end..head_end + len].to_vec();
+                let sha = path.trim_start_matches('/').to_string();
+                let authorized = |verb: &str, x: &str| -> bool {
+                    let Some(b64) = headers.get("authorization").and_then(|a| a.strip_prefix("Nostr ")) else {
+                        return false;
+                    };
+                    let url = b64.replace('+', "-").replace('/', "_");
+                    let Ok(raw) = hush_core::b64::decode(url.trim_end_matches('=')) else {
+                        return false;
+                    };
+                    let Ok(ev) = serde_json::from_slice::<Value>(&raw) else {
+                        return false;
+                    };
+                    ev["kind"] == 24_242
+                        && ev["content"] == verb
+                        && ev["tags"]
+                            .as_array()
+                            .is_some_and(|t| t.iter().any(|t| t[0] == "x" && t[1] == x))
+                };
+                let (status, out): (&str, Vec<u8>) = if st.down.load(Ordering::SeqCst) {
+                    ("503 Service Unavailable", vec![])
+                } else {
+                    match method {
+                        "PUT" if path == "/upload" => {
+                            let x = hex::encode(hush_core::kdf::sha256(&[&body]));
+                            if headers.get("x-sha-256") != Some(&x) || !authorized("upload", &x) {
+                                ("401 Unauthorized", vec![])
+                            } else {
+                                st.uploads.fetch_add(1, Ordering::SeqCst);
+                                st.blobs.lock().unwrap().insert(x.clone(), body);
+                                (
+                                    "201 Created",
+                                    json!({"sha256": x, "size": len}).to_string().into_bytes(),
+                                )
+                            }
+                        }
+                        "GET" | "HEAD" => match st.blobs.lock().unwrap().get(&sha) {
+                            Some(b) if method == "GET" => ("200 OK", b.clone()),
+                            Some(_) => ("200 OK", vec![]),
+                            None => ("404 Not Found", vec![]),
+                        },
+                        "DELETE" if authorized("delete", &sha) => {
+                            st.blobs.lock().unwrap().remove(&sha);
+                            ("204 No Content", vec![])
+                        }
+                        _ => ("400 Bad Request", vec![]),
+                    }
+                };
+                let resp = format!(
+                    "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    out.len()
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+                let _ = sock.write_all(&out).await;
+                let _ = sock.shutdown().await;
+            });
+        }
+    });
+    (host, state)
 }

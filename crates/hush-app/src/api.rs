@@ -33,6 +33,9 @@ pub struct Config {
     /// conversation ends: the phone apps keep them where nothing else could reach them later.
     /// The CLI saves into a folder the user chose, and leaves them there.
     pub discard_files: bool,
+    /// Blossom servers that keep a sealed copy of a file when no direct path carries it (empty:
+    /// files need a direct path).
+    pub blossom: Vec<String>,
 }
 
 /// What kind of link a nearby connection is, which decides its framing.
