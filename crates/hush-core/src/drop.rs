@@ -823,7 +823,7 @@ mod tests {
             // No 8-byte block repeats (ECB-like leaks), and every byte value is about as frequent
             // as the others: a chi-squared test over 256 values (99.99% bound: about 375).
             let mut seen = std::collections::HashSet::new();
-            assert!(seg.chunks_exact(8).all(|c| seen.insert(c)), "a repeated block");
+            assert!(seg.as_chunks::<8>().0.iter().all(|c| seen.insert(c)), "a repeated block");
             let mut counts = [0f64; 256];
             for &b in seg.iter() {
                 counts[usize::from(b)] += 1.0;
