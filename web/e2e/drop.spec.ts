@@ -128,3 +128,45 @@ test("in a conversation without a direct path, a file comes through a sealed cop
   await expect(alice.page.getByText("delivered ✓")).toBeVisible();
   await close(alice, bob);
 });
+
+test("downloaded once directly, the copy still serves the next person after the sender left", async ({
+  browser,
+}) => {
+  const data = Buffer.from(Array.from({ length: 400_000 }, (_, i) => (i * 13) & 255));
+  const alice = await person(browser, "Alice");
+  await open(alice);
+  await alice.page.getByTestId("home-send-files").click();
+  await alice.page
+    .getByTestId("drop-files")
+    .setInputFiles({ name: "photo.bin", mimeType: "application/octet-stream", buffer: data });
+  // The default: the copy stays until the link expires.
+  await expect(alice.page.getByLabel("Delete after the first download")).not.toBeChecked();
+  await alice.page.getByTestId("drop-send").click();
+  await expect(alice.page.getByTestId("drop-ready")).toBeVisible({ timeout: 30_000 });
+  const link = ((await alice.page.getByTestId("drop-link").textContent()) ?? "").replace(
+    "#",
+    "?nosw#",
+  );
+
+  // The sender checks the link while their page is open: it comes directly.
+  const bob = await person(browser, "Bob");
+  await bob.page.goto(link);
+  await expect(bob.page.getByText("The sender is online: direct transfer")).toBeVisible({
+    timeout: 30_000,
+  });
+  const first = bob.page.waitForEvent("download");
+  await bob.page.getByTestId("drop-download").click();
+  expect(sha(readFileSync(await (await first).path()))).toBe(sha(data));
+  await expect(alice.page.getByText("Delivered directly")).toBeVisible();
+  await expect(alice.page.getByText("Deleted from the servers")).toHaveCount(0);
+  await close(alice, bob);
+
+  // The sender is gone: the next person still gets it, from the copy.
+  const carol = await person(browser, "Carol");
+  await carol.page.goto(link);
+  await expect(carol.page.getByText("From the sealed copy")).toBeVisible({ timeout: 30_000 });
+  const second = carol.page.waitForEvent("download");
+  await carol.page.getByTestId("drop-download").click();
+  expect(sha(readFileSync(await (await second).path()))).toBe(sha(data));
+  await close(carol);
+});
