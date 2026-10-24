@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
-import { close, createLink, open, person, say } from "./helpers";
+import { close, createLink, HOST, open, person, say } from "./helpers";
 
 // The Rust engine the CLI and the mobile apps share, scripted: contacts and identifiers must work
 // between a phone and a browser exactly as between two browsers.
@@ -28,13 +28,9 @@ interface Peer {
 
 function robot(): Peer {
   const data = mkdtempSync(join(tmpdir(), "hush-peer-"));
-  const child = spawn(
-    BIN,
-    ["--relay", "ws://localhost:4173/relay", "--data", data, "--name", "Robot"],
-    {
-      stdio: ["pipe", "pipe", "inherit"],
-    },
-  );
+  const child = spawn(BIN, ["--relay", `ws://${HOST}/relay`, "--data", data, "--name", "Robot"], {
+    stdio: ["pipe", "pipe", "inherit"],
+  });
   const lines: string[] = [];
   child.stdout?.on("data", (d: Buffer) => {
     if (process.env.HUSH_E2E_VERBOSE) process.stderr.write(`[peer] ${d}`);

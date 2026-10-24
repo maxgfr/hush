@@ -17,12 +17,18 @@ There is a single cipher suite and nothing is negotiated, so nothing can be down
 ## 1. Links
 
 ```
-https://maxgfr.github.io/hush/#2.<mode>.<b64u(L)>.<expiry>[.p]
-mode    s (one-to-one) | g (group)
+https://maxgfr.github.io/hush/#2.<mode>.<b64u(L)>.<expiry>[.h<b64u(header)>.s<servers>][.p]
+mode    s (one-to-one) | g (group) | d (drop: one-to-one, files only, see §9)
 L       32 random bytes
 expiry  minutes since the Unix epoch, base 36, no leading zero
+.h .s   drop links only: where the sealed copy is stored (§9). header = H(header blob);
+        servers = 1 to 4 hosts (`name[:port]`, lowercase, not ending in `.p`) joined by `~`
 .p      the link needs a passphrase
+
+https://maxgfr.github.io/hush/#2.r.h<b64u(header)>.s<servers>      a drop sealed to identities: no secret
 ```
+
+Hosts contain dots, so only the first four fields split on `.`; the rest is the optional locator, then `.p`. A host is reached over HTTPS, except `localhost` and `127.0.0.1` (plain HTTP, for tests).
 
 ```
 root    = Extract("hush/v1/link", L)
@@ -146,13 +152,16 @@ On WebRTC, lanes 0, 1 and 2 are the negotiated DataChannels with ids 0, 1 and 2 
 ```
 ctrl: {"t":"name","name"} {"t":"verified"} {"t":"lock","locked"} {"t":"card","card":b64u}
 chat: {"t":"msg","id","ts","text","ttl"?} {"t":"del","id"}
-      {"t":"file","id","ts","name","size","mime","sha256","ttl"?} {"t":"file-get","id"} {"t":"file-end","id"} {"t":"file-cancel","id"}
+      {"t":"file","id","ts","name","size","mime","sha256","ttl"?,"path"?} {"t":"file-get","id"} {"t":"file-end","id"} {"t":"file-cancel","id"}
+      {"t":"file-drop-req","id"} {"t":"file-drop","id","hdr":b64u(32),"srv":[host…],"k":b64u(32)}
 file: 0x01 || id(16 ASCII) || u32(index) || ≤ 48 KiB of data          (lane 2, in order)
 ```
 
 - `id` is 16 base64url characters.
 - `ttl` is in seconds (at most 30 days) and both sides delete the message when it runs out.
 - The receiver checks the SHA-256, then sends `file-end`.
+- `path` places a file of a folder (`album/2024/a.jpg`): `/`-separated, no empty, `.` or `..` component, no backslash or control character, at most 1024 bytes. Receivers recreate the folders under their download folder, each name made safe, never through a symbolic link and never replacing a file.
+- Without a direct path (only the relays), the receiver sends `file-drop-req`. The sender seals the file as a drop with no stanza (§9) on blob servers, once per file, and answers `file-drop` with the header's address, the servers, and the file key `k`, which only ever travels inside the session. The receiver checks that the drop holds exactly the offered file (size and SHA-256), downloads it, and sends `file-end`. In a one-to-one conversation the receiver then deletes the copy; the sender deletes its copies when the conversation ends. A sender with no blob server answers `file-cancel`.
 
 ## 5. Identities, bundles, cards
 
@@ -254,3 +263,55 @@ Tokens derive from the envelope key, not the topic, so a relay cannot recognize 
 - Lanes 0 to 3 carry that peer's session frames (§4). When a handshake runs over a nearby link, the hello payloads carry no `sdp`: no WebRTC is set up.
 
 **Limits.** Each device keeps at most 8 nearby links. A link that sends more than 32 records that fail to open is closed, and so is one that carries nothing authentic within 30 seconds.
+
+## 9. Drops (sealed files)
+
+A drop is files sealed once and stored as opaque blobs on [Blossom](https://github.com/hzrd149/blossom) servers (BUD-01, BUD-02). It opens with a drop link (whoever holds the link), with an identity it was sealed to, or with its file key received inside a session (§4). While the sender is online, a drop link is also a one-to-one conversation link (mode `d`, §3): whoever opens it gets the files peer to peer (`file` offers with `path`, §4), and the blob servers are only used when the sender is gone or there is no direct path.
+
+**Stream and segments.** The files follow each other as one stream of `T` bytes (at most 4 GiB, at most 4096 files), cut into segments of 4 MiB:
+
+```
+n          = max(1, ceil(T / 4 MiB))
+pt_i       = stream bytes of segment i, then zeros up to 4 MiB
+             (when n = 1: up to min(4 MiB, padmé(max(T, 1024))))
+K          = 32 random bytes (the file key); drop_id = 16 random bytes
+segment_i  = AEAD(Expand(K, "hush/v2/drop/payload"), nonce_i, aad = drop_id, pt_i)
+nonce_i    = 0 0 0 last || u64(i)        last = 1 for the last segment, else 0
+```
+
+Every stored blob but a single-segment one is exactly 4 MiB + 16 bytes. Each segment opens on its own, and the nonce binds its index and whether it is the last: segments cannot be swapped, dropped or the stream cut short. Receivers check the zero padding.
+
+**Header.**
+
+```
+header      = "HUSHDR" || 0x02 || drop_id(16) || u8(count) || stanza{count} || u32(len) || manifest_ct
+aad         = "HUSHDR" || 0x02 || drop_id
+stanza      = 0x01 || XAEAD(Expand(drop_root, "hush/v2/drop/wrap-link" || drop_id), aad, K)                       (link, 72 bytes after the tag)
+            | 0x02 || u32(epoch) || ct(1120) || XAEAD(Expand(Extract("hush/v2/drop/kem", ss || ct || spk), "hush/v2/drop/wrap-kem" || drop_id), aad, K)
+manifest_ct = XAEAD(Expand(K, "hush/v2/drop/manifest"), aad = header up to u32(len), pad(manifest))
+```
+
+- At most 16 stanzas. A drop with none opens only with `K` (§4).
+- Link stanza: `drop_root = Extract("hush/v2/drop/link", L)`; with a passphrase `P`, `drop_root = Extract(that, Argon2id(P, salt = H("hush/v1/link/pass" || L)[..16], m = 64 MiB, t = 3, p = 1))`. The labels keep it apart from the session keys of the same link.
+- Identity stanza: `(ct, ss) = X-Wing encapsulation to spk(epoch)`, the recipient's signed prekey from its bundle (§5). The recipient derives `spk(epoch)` from its seed and tries every identity stanza; the stanza does not name the recipient.
+
+**Manifest.**
+
+```
+manifest = u64(created_ms) || u64(expires_ms) || u8(once) || delete_key(32)
+         || u32(n) || H(segment_0) … H(segment_n-1)
+         || u32(files) || { u16(len) || path || u64(size) || u8(len) || mime || H(file) }*
+         || 0x00                                                               unsigned
+          | 0x01 || ed_pk(32) || mldsa_pk(1952) || sig("drop", drop_id || H(stanzas) || H(manifest up to here))
+```
+
+- `H(segment_i)` is the blob address of each segment; the header's own address is in the link.
+- Paths follow the rules of §4. Sizes add up to `T`.
+- `once`: the first recipient to download it deletes it (and the sender, when it is delivered peer to peer). Nothing enforces it: a server may keep the bytes.
+- `delete_key` is a throwaway secp256k1 secret: whoever can open the drop can delete its blobs.
+- A signature is hybrid (§5) and covers the stanzas, so nobody holding `K` can re-address the drop as the sender's.
+- Past `expires_ms` a drop is refused.
+
+**Storing.** A sender seals the stream once to learn every segment's address and builds the header, which it uploads first (to 2 servers, the ones the link then names). It seals again while uploading, and checks each segment against its address before it leaves: a file that changed in between would reuse a nonce on other bytes. Uploads and deletions carry `Authorization: Nostr base64(event)`, a kind 24242 event signed by `delete_key` with tags `["t", "upload" | "delete"]`, `["x", hex(H(blob))]` and `["expiration", …]`. Receivers check every blob's SHA-256 and every file's.
+
+**Defaults.** `nostr.download`, `blossom.yakihonne.com` and `files.sovbit.host` took anonymous uploads of opaque blobs, served them with CORS and honored deletions when this was written (October 2026). Each client lets you change them.

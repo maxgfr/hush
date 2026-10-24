@@ -45,6 +45,7 @@ An identifier is `hush1` + bech32m(SHA-256(Ed25519 public key ‖ ML-DSA-65 publ
 |---|---|---|
 | GitHub Pages (the web server) | That someone loaded the app; IP address | The link secret (fragment), any message |
 | Nostr relays / WebTorrent trackers | IP address, timing, a random-looking topic that changes daily, envelope sizes (padded) | Who talks to whom, names, content, IP of the other side |
+| Blob servers (sealed drops) | IP addresses of the sender and of each recipient, when and how much (blobs of 4 MiB, the count of segments), how often a drop is fetched | Names, content, who it is for, the link or its passphrase (a drop sealed to identities does not name them) |
 | STUN servers | IP address | Anything else |
 | TURN server (if you set one) | IP addresses, sizes and timing of encrypted traffic | Content |
 | The other person | Your IP address (unless you force TURN with "Always go through TURN"), your display name | Your vault, other conversations |
@@ -82,7 +83,11 @@ Saved contacts were verified when they were saved, and reconnect with a mutually
   - Contacts' daily topics are unlinkable to outsiders, but a relay could notice one IP subscribing to several of them.
   - Use TURN-only mode, a VPN or Tor at the system level if that matters.
 - **Passphrases** are only as strong as their entropy, slowed by Argon2id. Someone holding a protected link can try passphrases offline against a captured first message. Use long, random passphrases.
-- **Both apps must be open.** There is no server and no push, so a message cannot reach a closed app.
+- **Both apps must be open** for messages. There is no server and no push, so a message cannot reach a closed app.
+- **Sealed drops wait on public servers.** When a file cannot go peer to peer, its ciphertext waits on Blossom servers until it expires.
+  - They see ciphertext only, under the same post-quantum keys, but they see IP addresses, sizes and timing, and they keep the bytes as long as they like: deletion is a request, and "one-time" is honored by clients, not enforced. Whoever later obtains the link (and its passphrase) and the bytes can open the drop.
+  - A drop sealed to identities opens only with one of those identities' seeds; its link holds no key.
+  - Send with "peer to peer only" (`--p2p-only`) or turn the servers off in Settings (`--no-servers`) to store nothing anywhere.
 - **Group messages** are encrypted pairwise. A member who leaves keeps what they already received. Names are made unique within a group and renames are announced, but a name is still chosen by its owner: compare the emojis with each member.
 - **Contacts.**
   - Contacts are saved only after both people compared the emojis. They reconnect with keys only they hold.

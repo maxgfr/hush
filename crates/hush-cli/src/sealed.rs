@@ -418,6 +418,8 @@ pub async fn receive_link(mut cfg: Config, input: String, link: Link, pass: Opti
         }
     };
     app.send(Cmd::End { chat });
+    // Let the last acknowledgements (`file-end`) and the farewell leave before going on.
+    tokio::time::sleep(Duration::from_millis(500)).await;
     if let Some(h) = header.take() {
         match h.await.map_err(|e| anyhow!("{e}")).and_then(|r| r) {
             Ok(o) => {

@@ -82,7 +82,10 @@ export async function boot(): Promise<void> {
   if (fragment) openLink(fragment);
   window.addEventListener("hashchange", () => {
     const f = takeFragment();
-    if (f && view.value.name !== "chat" && view.value.name !== "dropReceive") openLink(f);
+    if (!f || view.value.name === "chat") return;
+    // Another drop link while one is shown: it replaces it.
+    if (view.value.name === "dropReceive") view.value.drop.close();
+    openLink(f);
   });
 }
 

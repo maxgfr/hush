@@ -19,7 +19,8 @@
 |---|---|
 | One-to-one links | The first person to open the link takes it. A latecomer is told "link already used", which reveals an interception. |
 | Group links | A full mesh of pairwise post-quantum sessions, up to 16 people. The room can be locked. |
-| Files | Any size, sent peer to peer and checked with SHA-256. |
+| Files | Up to 4 GB, files and folders, sent peer to peer and checked with SHA-256. Without a direct path they come through a sealed copy. |
+| Drops | Send files by link, like a transfer service: peer to peer while you are both online, otherwise from a sealed copy on public blob servers that only ever see ciphertext. One-time or not, with a passphrase, or sealed to contacts or yourself so the link holds no key. |
 | Disappearing messages | A timer from 30 s to 1 week, enforced on both sides. |
 | Identifier, no sign-up | `hush1…` is computed on your device from your public keys (Ed25519 + ML-DSA-65), so nobody can impersonate it. |
 | Contacts (opt-in) | Reconnect later without a new link. Saved contacts are kept in an encrypted vault (Argon2id + XChaCha20-Poly1305) that only your passphrase opens. |
@@ -47,8 +48,11 @@ That is much stronger than RSA, which a quantum computer breaks outright. It sti
 brew install maxgfr/tap/hush
 hush chat                                   # prints a link (and a QR code), then chat in the terminal
 hush chat 'https://maxgfr.github.io/hush/#2.s.…'
-hush send report.pdf photos.zip             # prints a link; exits once the files are delivered
-hush receive 'https://maxgfr.github.io/hush/#2.s.…' --out ~/Downloads
+hush send report.pdf photos/                # prints a link: peer to peer now, a sealed copy for later
+hush send film.mkv --p2p-only               # nothing stored: the link works while this runs
+hush send contrat.pdf --to Alice --identity hush-backup.hush   # sealed to a contact, signed by you
+hush receive 'https://maxgfr.github.io/hush/#2.d.…' --out ~/Downloads
+hush drop rm 'https://maxgfr.github.io/hush/#2.d.…'           # delete the sealed copy
 hush backup inspect hush-backup.hush        # read a backup made by the web app
 hush new --group --expires 1440             # just print a link
 ```
@@ -64,6 +68,8 @@ Useful flags:
 - `--passphrase` (or `HUSH_PASSPHRASE`) for links that need one.
 - `--ttl SECONDS` for disappearing messages.
 - `--relay-only --turn URL` to hide your IP address.
+- `--server HOST` (or `HUSH_BLOSSOM`) for the blob servers of sealed copies, `--no-servers` for none.
+- `--many` keeps a drop after its first download; `--expires MINUTES` (10 to 10080).
 - `--offline` to swap QR codes with no network.
 
 ## Phones

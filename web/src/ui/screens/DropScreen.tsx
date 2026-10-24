@@ -19,10 +19,6 @@ function Picker(props: { onAdd: (e: DropEntry[]) => void; big?: boolean }): JSX.
   const files = useRef<HTMLInputElement>(null);
   const folder = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
-  useEffect(() => {
-    // `webkitdirectory` is not in Preact's attribute types.
-    folder.current?.setAttribute("webkitdirectory", "");
-  }, []);
   const pick = (input: HTMLInputElement) => {
     props.onAdd(entriesFromFiles(input.files ?? []));
     input.value = "";
@@ -64,7 +60,11 @@ function Picker(props: { onAdd: (e: DropEntry[]) => void; big?: boolean }): JSX.
         onChange={(e) => pick(e.target as HTMLInputElement)}
       />
       <input
-        ref={folder}
+        // `webkitdirectory` is not in Preact's attribute types: set as soon as it exists.
+        ref={(el) => {
+          el?.setAttribute("webkitdirectory", "");
+          folder.current = el;
+        }}
         type="file"
         multiple
         hidden

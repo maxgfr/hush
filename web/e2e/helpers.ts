@@ -1,19 +1,23 @@
 import { type Browser, type BrowserContext, expect, type Page } from "@playwright/test";
 
-export const BASE = "http://localhost:4173";
+export const PORT = Number(process.env.HUSH_E2E_PORT ?? 4173);
+export const HOST = `localhost:${PORT}`;
+export const BASE = `http://${HOST}`;
 
 /** Local relay only, no tracker, no STUN: tests never touch the public network. */
 export function settingsJson(name: string, extra: Record<string, unknown> = {}): string {
   return JSON.stringify({
     name,
-    relays: ["ws://localhost:4173/relay"],
-    trackers: ["ws://localhost:4173/tracker"],
+    relays: [`ws://${HOST}/relay`],
+    trackers: [`ws://${HOST}/tracker`],
     nostr: true,
     torrent: false,
     stun: [],
     turn: null,
     relayOnly: false,
     ttl: 0,
+    blossom: [HOST],
+    blossomOn: true,
     ...extra,
   });
 }
@@ -83,4 +87,24 @@ export async function close(...people: Person[]): Promise<void> {
     expect(p.errors, "no uncaught errors").toEqual([]);
     await p.ctx.close();
   }
+}
+
+/** The entries of a ZIP the app made (stored, data descriptors), from its central directory. */
+export function unzip(z: Buffer): { name: string; data: Buffer }[] {
+  const eocd = z.length - 22;
+  const n = z.readUInt16LE(eocd + 10);
+  let cd = z.readUInt32LE(eocd + 16);
+  const out: { name: string; data: Buffer }[] = [];
+  for (let i = 0; i < n; i++) {
+    const size = z.readUInt32LE(cd + 24);
+    const nl = z.readUInt16LE(cd + 28);
+    const el = z.readUInt16LE(cd + 30);
+    const cl = z.readUInt16LE(cd + 32);
+    const off = z.readUInt32LE(cd + 42);
+    const name = z.subarray(cd + 46, cd + 46 + nl).toString("utf8");
+    const start = off + 30 + z.readUInt16LE(off + 26) + z.readUInt16LE(off + 28);
+    out.push({ name, data: z.subarray(start, start + size) });
+    cd += 46 + nl + el + cl;
+  }
+  return out;
 }

@@ -1,19 +1,21 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, test } from "@playwright/test";
-import { close, createLink, open, person, sas, say } from "./helpers";
+import { close, createLink, HOST, open, person, sas, say, unzip } from "./helpers";
 
 const BIN = resolve(process.cwd(), "../target", process.env.HUSH_CLI_PROFILE ?? "debug", "hush");
 const NET = [
   "--relay",
-  "ws://localhost:4173/relay",
+  `ws://${HOST}/relay`,
   "--no-torrent",
   "--no-stun",
+  "--server",
+  HOST,
   "--base",
-  "http://localhost:4173/?nosw",
+  `http://${HOST}/?nosw`,
 ];
 
 // Chromium hides host IPs behind mDNS names, which CI runners cannot resolve; real networks also
@@ -84,17 +86,19 @@ test("a browser and the CLI chat: same emojis, messages both ways, ending erases
   await close(alice);
 });
 
-test("the CLI sends a file to a browser (SHA-256 checked)", async ({ browser }) => {
+test("the CLI sends a file to a browser in a conversation (SHA-256 checked)", async ({
+  browser,
+}) => {
   const dir = mkdtempSync(join(tmpdir(), "hush-cli-"));
   const src = join(dir, "from-cli.bin");
   const data = Buffer.from(
     Array.from({ length: 2 * 1024 * 1024 + 17 }, (_, i) => (i * 31 + 7) & 255),
   );
   writeFileSync(src, data);
-  const cli = run(["send", src, "--name", "Terminal", ...NET]);
-  await expect.poll(() => cli.out[0] ?? "", { timeout: 15_000 }).toContain("#2.s.");
   const bob = await person(browser, "Bob");
-  await bob.page.goto(cli.out[0] as string);
+  await open(bob);
+  const link = await createLink(bob);
+  const cli = run(["send", src, "--link", link, "--name", "Terminal", ...NET]);
   await expect(bob.page.getByText("from-cli.bin")).toBeVisible({ timeout: 30_000 });
   await bob.page.getByRole("button", { name: "Download" }).click();
   const download = bob.page.waitForEvent("download");
@@ -121,6 +125,66 @@ test("a browser sends a file the CLI receives", async ({ browser }) => {
   await alice.page.getByTestId("end").click();
   expect(await cli.exited).toBe(0);
   await close(alice);
+});
+
+test("the CLI drops a folder: the browser gets it from the sealed copy once the CLI is gone", async ({
+  browser,
+}) => {
+  const dir = mkdtempSync(join(tmpdir(), "hush-cli-"));
+  mkdirSync(join(dir, "photos", "2026"), { recursive: true });
+  const big = Buffer.from(Array.from({ length: 5 * 1024 * 1024 + 3 }, (_, i) => (i * 13) & 255));
+  writeFileSync(join(dir, "photos", "2026", "big.jpg"), big);
+  writeFileSync(join(dir, "photos", "notes.txt"), "hello");
+  const cli = run(["send", join(dir, "photos"), ...NET]);
+  expect(await cli.exited).toBe(0);
+  expect(cli.err.join("\n")).toContain("the link works without you now");
+  const link = cli.out[0] ?? "";
+  expect(link).toContain("#2.d.");
+  const bob = await person(browser, "Bob");
+  await bob.page.goto(link);
+  await expect(bob.page.getByText("photos/2026/big.jpg")).toBeVisible({ timeout: 30_000 });
+  const download = bob.page.waitForEvent("download");
+  await bob.page.getByTestId("drop-download").click();
+  const zip = await download;
+  expect(zip.suggestedFilename()).toBe("photos.zip");
+  const entries = unzip(readFileSync(await zip.path()));
+  expect(entries.map((e) => e.name)).toEqual(["photos/2026/big.jpg", "photos/notes.txt"]);
+  expect(sha(entries[0]?.data as Buffer)).toBe(sha(big));
+  await expect(bob.page.getByTestId("drop-saved")).toBeVisible();
+  await close(bob);
+});
+
+test("a browser drops files, the CLI receives them (peer to peer, then from the copy)", async ({
+  browser,
+}) => {
+  const alice = await person(browser, "Alice");
+  await open(alice);
+  await alice.page.getByTestId("home-send-files").click();
+  const data = Buffer.from(Array.from({ length: 300_000 }, (_, i) => (i * 7) & 255));
+  await alice.page.getByTestId("drop-files").setInputFiles([
+    { name: "a.bin", mimeType: "application/octet-stream", buffer: data },
+    { name: "b.txt", mimeType: "text/plain", buffer: Buffer.from("b") },
+  ]);
+  await alice.page.getByLabel("Delete after the first download").uncheck();
+  await alice.page.getByTestId("drop-send").click();
+  await expect(alice.page.getByTestId("drop-ready")).toBeVisible({ timeout: 30_000 });
+  const link = (await alice.page.getByTestId("drop-link").textContent()) ?? "";
+
+  const live = mkdtempSync(join(tmpdir(), "hush-cli-"));
+  const p2p = run(["receive", link, "--out", live, ...NET]);
+  expect(await p2p.exited).toBe(0);
+  expect(p2p.err.join("\n")).toContain("receiving peer to peer");
+  expect(sha(readFileSync(join(live, "a.bin")))).toBe(sha(data));
+  await expect(alice.page.getByText("Delivered directly")).toBeVisible();
+
+  // Alice leaves: a second download comes from the sealed copy.
+  await close(alice);
+  const later = mkdtempSync(join(tmpdir(), "hush-cli-"));
+  const copy = run(["receive", link, "--out", later, ...NET]);
+  expect(await copy.exited).toBe(0);
+  expect(copy.err.join("\n")).toContain("using the sealed copy");
+  expect(sha(readFileSync(join(later, "a.bin")))).toBe(sha(data));
+  expect(readFileSync(join(later, "b.txt"), "utf8")).toBe("b");
 });
 
 test("a backup exported by the web app opens in the CLI", async ({ browser }) => {

@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const PORT = 4173;
+// HUSH_E2E_PORT when 4173 is taken by something else on the machine.
+const PORT = Number(process.env.HUSH_E2E_PORT ?? 4173);
 
 export default defineConfig({
   testDir: "e2e",
