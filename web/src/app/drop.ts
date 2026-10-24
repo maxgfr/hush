@@ -353,6 +353,16 @@ export class IncomingDrop {
     return this.offers.value.map((f) => ({ path: f.path ?? f.name, size: f.size, mime: f.mime }));
   }
 
+  /**
+   * The sender is online but has not offered every file yet (the offers follow the handshake):
+   * waits a little for them, rather than taking the sealed copy while the sender is right there.
+   */
+  private async offersFromSender(): Promise<void> {
+    const want = this.manifest.value?.files.length ?? 0;
+    for (let i = 0; i < 50 && this.online.value && this.offers.value.length < want; i++)
+      await new Promise((r) => setTimeout(r, 100));
+  }
+
   private p2pReady(): boolean {
     const want = this.manifest.value?.files.length ?? this.offers.value.length;
     const total = this.files().reduce((n, f) => n + f.size, 0);
@@ -388,6 +398,7 @@ export class IncomingDrop {
     this.progress.value = 0;
     this.error.value = null;
     try {
+      await this.offersFromSender();
       if (this.conv && this.p2pReady()) {
         this.source.value = "p2p";
         await this.viaPeer(this.conv, sink, total);
