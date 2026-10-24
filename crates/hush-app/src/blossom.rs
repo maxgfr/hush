@@ -176,7 +176,8 @@ impl Blossom {
             }
             tokio::time::sleep(Duration::from_millis(500 << attempt)).await;
         }
-        errors.dedup();
+        let mut seen = std::collections::HashSet::new();
+        errors.retain(|e| seen.insert(e.clone()));
         bail!("{}", errors.join("; "))
     }
 

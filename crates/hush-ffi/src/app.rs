@@ -96,6 +96,10 @@ pub struct LinkInfo {
     pub group: bool,
     pub passphrase: bool,
     pub expires_ms: u64,
+    /// A drop link: join it to get the files peer to peer, or `receive_drop` its sealed copy.
+    pub drop: bool,
+    /// It names a sealed copy on blob servers.
+    pub sealed_copy: bool,
 }
 
 /// Reads a link (a full URL, a fragment, or a scanned QR code). Fails with `Outdated` for an
@@ -107,7 +111,61 @@ pub fn link_info(input: String) -> Res<LinkInfo> {
         group: link.mode == hush_core::link::Mode::Group,
         passphrase: link.passphrase,
         expires_ms: link.expires_min * 60_000,
+        drop: link.mode == hush_core::link::Mode::Drop,
+        sealed_copy: link.locator.is_some(),
     })
+}
+
+/// Whether this is a drop sealed to identities (`#2.r.…`): `receive_drop` opens it with ours.
+#[uniffi::export]
+pub fn is_sealed_drop(input: String) -> bool {
+    hush_core::link::Locator::parse_sealed(&input).is_ok()
+}
+
+/// The web app's blob servers for sealed copies.
+#[uniffi::export]
+pub fn default_blob_servers() -> Vec<String> {
+    hush_app::blossom::DEFAULT_SERVERS
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+}
+
+/// Where a drop is in its work.
+#[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DropPhase {
+    Sealing,
+    Uploading,
+    Downloading,
+}
+
+/// Progress of `send_drop` and `receive_drop`, in bytes. Called from a hush thread.
+#[uniffi::export(foreign)]
+pub trait DropProgress: Send + Sync {
+    fn on_progress(&self, phase: DropPhase, done: u64, total: u64);
+}
+
+#[derive(uniffi::Record)]
+pub struct DropSent {
+    /// The link to share (a drop link, or a sealed one that holds no key).
+    pub url: String,
+    pub servers: Vec<String>,
+    pub expires_ms: u64,
+}
+
+#[derive(uniffi::Record)]
+pub struct DropReceived {
+    /// Where each file was saved (folders recreated).
+    pub paths: Vec<String>,
+    /// The sender's `hush1…` identifier, when the drop is signed.
+    pub sender: Option<String>,
+    /// A one-time drop: deleted from the servers once saved.
+    pub deleted: bool,
+}
+
+fn progress(p: &Arc<dyn DropProgress>, phase: DropPhase) -> hush_app::drops::Progress {
+    let p = Arc::clone(p);
+    Arc::new(move |done, total| p.on_progress(phase, done, total))
 }
 
 /// Whether a `hush1…` identifier is well formed (its checksum catches typos).
@@ -579,6 +637,44 @@ pub struct HushApp {
 }
 
 impl HushApp {
+    /// Fetches and opens a drop's header: with the link (and passphrase), or our identity.
+    fn open_drop(
+        &self,
+        input: &str,
+        passphrase: Option<String>,
+    ) -> Res<(
+        hush_core::drop::Opened,
+        hush_core::link::Locator,
+        hush_app::blossom::Blossom,
+    )> {
+        use hush_core::drop::{Unlock, open_header};
+        let http = hush_app::blossom::Blossom::new();
+        let now = hush_app::util::now_ms();
+        if let Ok(locator) = hush_core::link::Locator::parse_sealed(input) {
+            let keys = self.ask(|reply| {
+                Cmd::Contacts(ContactCmd::SealKeys {
+                    contacts: vec![],
+                    me: false,
+                    reply,
+                })
+            })?;
+            let me = hush_core::identity::Identity::from_seed(keys.seed);
+            let header = self
+                .rt
+                .block_on(hush_app::drops::fetch_header(&http, &locator))
+                .map_err(app_err)?;
+            return Ok((open_header(&header, &Unlock::Identity(&me), now)?, locator, http));
+        }
+        let link = hush_core::link::Link::parse(input)?;
+        let locator = link.locator.clone().ok_or(hush_core::Error::Malformed)?;
+        let root = link.drop_root(passphrase.filter(|p| !p.is_empty()).as_deref())?;
+        let header = self
+            .rt
+            .block_on(hush_app::drops::fetch_header(&http, &locator))
+            .map_err(app_err)?;
+        Ok((open_header(&header, &Unlock::Secret(&root), now)?, locator, http))
+    }
+
     fn ask<T: Send + 'static>(&self, make: impl FnOnce(hush_app::engine::Reply<T>) -> Cmd) -> Res<T> {
         // From inside a callback (a runtime thread), waiting would panic, and a panic aborts the
         // whole app (panic = "abort"): say so instead.
@@ -784,6 +880,158 @@ impl HushApp {
     /// Our `hush1…` identifier, created if needed (needs an unlocked vault).
     pub fn ensure_identity(&self) -> Res<String> {
         self.ask(|reply| Cmd::Contacts(ContactCmd::EnsureIdentity { reply }))
+    }
+
+    // drops
+
+    /// Blob servers for sealed copies: drops, and files without a direct path in a conversation.
+    pub fn set_blob_servers(&self, servers: Vec<String>) {
+        self.app.send(Cmd::SetBlossom(servers));
+    }
+
+    /// Seals files and folders on blob servers and returns the link (blocking: call it off the
+    /// UI thread). Without contacts and `to_self`, whoever holds the link (and `passphrase`) opens
+    /// it; otherwise only those people, and it is signed with our identity (needs the vault).
+    #[allow(clippy::too_many_arguments)]
+    pub fn send_drop(
+        &self,
+        paths: Vec<String>,
+        ttl_min: u64,
+        once: bool,
+        passphrase: Option<String>,
+        to_contacts: Vec<String>,
+        to_self: bool,
+        servers: Vec<String>,
+        base: String,
+        progress_to: Arc<dyn DropProgress>,
+    ) -> Res<DropSent> {
+        if tokio::runtime::Handle::try_current().is_ok() {
+            return Err(HushError::App {
+                reason: "called from a hush callback: call it from another thread".into(),
+            });
+        }
+        use hush_core::drop::Recipient;
+        use hush_core::link::{Link, Mode};
+        let sources =
+            hush_app::drops::collect(&paths.iter().map(PathBuf::from).collect::<Vec<_>>()).map_err(app_err)?;
+        let ttl_min = ttl_min.clamp(10, 7 * 24 * 60);
+        let expires_ms = hush_app::util::now_ms() + ttl_min * 60_000;
+        let pass = passphrase.filter(|p| !p.is_empty());
+        let sealed = !to_contacts.is_empty() || to_self;
+        let keys = if sealed {
+            Some(self.ask(|reply| {
+                Cmd::Contacts(ContactCmd::SealKeys {
+                    contacts: to_contacts,
+                    me: to_self,
+                    reply,
+                })
+            })?)
+        } else {
+            None
+        };
+        let mut link = Link::generate(
+            Mode::Drop,
+            hush_app::util::now_ms(),
+            ttl_min,
+            pass.is_some(),
+            &mut hush_app::util::rng(),
+        );
+        let root = if sealed {
+            None
+        } else {
+            Some(link.drop_root(pass.as_deref())?)
+        };
+        let signer = keys.as_ref().map(|k| hush_core::identity::Identity::from_seed(k.seed));
+        let recipients: Vec<Recipient<'_>> = match (&keys, &root) {
+            (Some(k), _) => k
+                .keys
+                .iter()
+                .map(|(ek, epoch)| Recipient::Key { ek, epoch: *epoch })
+                .collect(),
+            (None, Some(r)) => vec![Recipient::Secret(r)],
+            (None, None) => vec![],
+        };
+        let once = once && keys.as_ref().is_none_or(|k| k.keys.len() == 1 && !to_self);
+        let prepared = hush_app::drops::prepare(
+            sources,
+            &recipients,
+            signer.as_ref(),
+            expires_ms,
+            once,
+            &progress(&progress_to, DropPhase::Sealing),
+        )
+        .map_err(app_err)?;
+        let http = hush_app::blossom::Blossom::new();
+        let prepared = Arc::new(prepared);
+        let locator = self
+            .rt
+            .block_on(async {
+                let locator = hush_app::drops::upload_header(&prepared, &http, &servers).await?;
+                hush_app::drops::upload_segments(
+                    Arc::clone(&prepared),
+                    &http,
+                    &locator,
+                    progress(&progress_to, DropPhase::Uploading),
+                )
+                .await?;
+                anyhow::Ok(locator)
+            })
+            .map_err(app_err)?;
+        let url = if sealed {
+            locator.sealed_url(&base)
+        } else {
+            link.locator = Some(locator.clone());
+            link.url(&base)
+        };
+        Ok(DropSent {
+            url,
+            servers: locator.servers,
+            expires_ms,
+        })
+    }
+
+    /// Downloads a drop's sealed copy into `out_dir` (blocking, resumable). A drop sealed to
+    /// identities opens with ours (needs the vault).
+    pub fn receive_drop(
+        &self,
+        link: String,
+        passphrase: Option<String>,
+        out_dir: String,
+        progress_to: Arc<dyn DropProgress>,
+    ) -> Res<DropReceived> {
+        if tokio::runtime::Handle::try_current().is_ok() {
+            return Err(HushError::App {
+                reason: "called from a hush callback: call it from another thread".into(),
+            });
+        }
+        let (opened, locator, http) = self.open_drop(&link, passphrase)?;
+        let paths = self
+            .rt
+            .block_on(hush_app::drops::download(
+                &opened,
+                &locator,
+                &http,
+                std::path::Path::new(&out_dir),
+                progress(&progress_to, DropPhase::Downloading),
+            ))
+            .map_err(app_err)?;
+        let deleted = opened.manifest.once && self.rt.block_on(hush_app::drops::delete(&opened, &locator, &http));
+        Ok(DropReceived {
+            paths: paths.iter().map(|p| p.to_string_lossy().into_owned()).collect(),
+            sender: opened.sender.as_ref().map(|s| s.id()),
+            deleted,
+        })
+    }
+
+    /// Deletes a drop's sealed copy from its servers (whoever can open it can delete it).
+    pub fn delete_drop(&self, link: String, passphrase: Option<String>) -> Res<bool> {
+        if tokio::runtime::Handle::try_current().is_ok() {
+            return Err(HushError::App {
+                reason: "called from a hush callback: call it from another thread".into(),
+            });
+        }
+        let (opened, locator, http) = self.open_drop(&link, passphrase)?;
+        Ok(self.rt.block_on(hush_app::drops::delete(&opened, &locator, &http)))
     }
 
     pub fn remove_contact(&self, key: String) {

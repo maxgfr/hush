@@ -6,10 +6,10 @@
 #![forbid(unsafe_code)]
 
 use getrandom::SysRng;
+use hush_core::drop::{self, DropFile, Manifest, Recipient, Unlock};
 use hush_core::envelope::{self, Envelope, PeerTag, ReplayGuard};
 use hush_core::handshake::{self as hs, ContactParams, Established};
 use hush_core::identity::Identity as CoreIdentity;
-use hush_core::drop::{self, DropFile, Manifest, Recipient, Unlock};
 use hush_core::link::{Link, LinkKeys, Locator, Mode};
 use hush_core::vault::KdfParams;
 use hush_core::{Error, backup, bundle, contact, id, lookup, pow, sas, session, vault};
@@ -815,7 +815,9 @@ fn manifest_from(o: &Object) -> Result<Manifest, JsError> {
         .map(|f| {
             let f: Object = f.dyn_into().map_err(|_| err(Error::InvalidParameter))?;
             Ok(DropFile {
-                path: get(&f, "path").as_string().ok_or_else(|| err(Error::InvalidParameter))?,
+                path: get(&f, "path")
+                    .as_string()
+                    .ok_or_else(|| err(Error::InvalidParameter))?,
                 size: get_u64(&f, "size")?,
                 mime: get(&f, "mime").as_string().unwrap_or_default(),
                 sha256: arr32(&get_bytes(&f, "sha256")?)?,
@@ -971,7 +973,12 @@ pub struct DropOpener {
 /// Opens a drop header with its link (slow with a passphrase). Throws `Decrypt` for a wrong
 /// passphrase, `Expired` past its expiry.
 #[wasm_bindgen(js_name = dropOpenLink)]
-pub fn drop_open_link(header: &[u8], fragment: &str, passphrase: Option<String>, now: f64) -> Result<DropOpener, JsError> {
+pub fn drop_open_link(
+    header: &[u8],
+    fragment: &str,
+    passphrase: Option<String>,
+    now: f64,
+) -> Result<DropOpener, JsError> {
     let link = Link::parse(fragment).map_err(err)?;
     let root = link.drop_root(passphrase.as_deref()).map_err(err)?;
     let inner = drop::open_header(header, &Unlock::Secret(&root), now_ms(now)).map_err(err)?;

@@ -24,6 +24,10 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uniffi.hush_ffi.ChatType
+import uniffi.hush_ffi.DropPhase
+import uniffi.hush_ffi.DropProgress
+import uniffi.hush_ffi.defaultBlobServers
+import uniffi.hush_ffi.isSealedDrop
 import uniffi.hush_ffi.Ending
 import uniffi.hush_ffi.HushException
 import uniffi.hush_ffi.LookupStatus
@@ -42,7 +46,25 @@ sealed interface Screen {
     data object Contacts : Screen
     data object Identity : Screen
     data object Settings : Screen
+    /** Send files by link: sealed on blob servers, opened by whoever has the link. */
+    data object Drop : Screen
+    /** A drop link (or one sealed to us) to download. */
+    data class DropReceive(val link: String) : Screen
 }
+
+/** Where a drop being sent or received is. */
+data class DropUi(
+    val phase: DropPhase? = null,
+    val done: Long = 0,
+    val total: Long = 0,
+    val url: String? = null,
+    val expiresMs: Long = 0,
+    val saved: List<String> = emptyList(),
+    val sender: String? = null,
+    val deleted: Boolean = false,
+    @StringRes val error: Int? = null,
+    val running: Boolean = false,
+)
 
 /** Navigation and every action of the screens; engine calls that block run on Dispatchers.IO. */
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -149,6 +171,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun openLink(input: String) {
         val link = input.trim()
         if (link.isEmpty()) return
+        if (isSealedDrop(link)) return showOn(Screen.DropReceive(link))
         io {
             val info = try {
                 linkInfo(link)
@@ -159,6 +182,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             when {
                 info.expiresMs.toLong() < System.currentTimeMillis() -> main { showJoin(R.string.expired_link) }
+                // A drop with a sealed copy: downloaded from it (with its passphrase, if any).
+                info.drop && info.sealedCopy -> main { showOn(Screen.DropReceive(link)) }
                 info.passphrase -> main { showOn(Screen.Passphrase(link)) }
                 else -> join(link, null)
             }
@@ -211,6 +236,85 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 resolver.openInputStream(uri)?.use { input -> file.outputStream().use { input.copyTo(it) } } != null
             }.getOrDefault(false)
             if (ok) app.sendFile(chat, file.path) else main { message = R.string.file_failed }
+        }
+    }
+
+    // ── drops ──
+
+    var drop by mutableStateOf(DropUi())
+        private set
+
+    private fun progress() = object : DropProgress {
+        override fun onProgress(phase: DropPhase, done: ULong, total: ULong) {
+            viewModelScope.launch(Dispatchers.Main) {
+                drop = drop.copy(phase = phase, done = done.toLong(), total = total.toLong())
+            }
+        }
+    }
+
+    fun newDrop() {
+        drop = DropUi()
+    }
+
+    /** Copies the picked files into the cache, seals them on blob servers, and shows the link. */
+    fun sendDrop(uris: List<Uri>, ttlMin: Long, once: Boolean, passphrase: String) {
+        if (drop.running || uris.isEmpty()) return
+        drop = DropUi(running = true)
+        io {
+            val resolver = getApplication<Application>().contentResolver
+            val dir = File(engine.dropsDir, UUID.randomUUID().toString()).apply { mkdirs() }
+            val paths = uris.mapNotNull { uri ->
+                val name = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                    if (c.moveToFirst()) c.getString(0) else null
+                }
+                val file = File(dir, safeName(name))
+                runCatching {
+                    resolver.openInputStream(uri)?.use { input -> file.outputStream().use { input.copyTo(it) } }
+                    file.path
+                }.getOrNull()
+            }
+            val result = runCatching {
+                app.sendDrop(
+                    paths, ttlMin.toULong(), once, passphrase.ifEmpty { null }, emptyList(), false,
+                    defaultBlobServers(), io.github.maxgfr.hush.core.Settings.LINK_BASE, progress(),
+                )
+            }
+            // The sealed copy is uploaded: the plain copies have no reason to stay.
+            dir.deleteRecursively()
+            main {
+                drop = result.fold(
+                    { drop.copy(running = false, url = it.url, expiresMs = it.expiresMs.toLong()) },
+                    { drop.copy(running = false, error = R.string.drop_failed) },
+                )
+            }
+        }
+    }
+
+    /** Downloads a drop's sealed copy into the app's received files. */
+    fun receiveDrop(link: String, passphrase: String) {
+        if (drop.running) return
+        drop = DropUi(running = true)
+        io {
+            val result = runCatching {
+                app.receiveDrop(link, passphrase.ifEmpty { null }, engine.receivedDir.path, progress())
+            }
+            main {
+                drop = result.fold(
+                    { drop.copy(running = false, saved = it.paths, sender = it.sender, deleted = it.deleted) },
+                    { e ->
+                        val reason = (e as? HushException.Core)?.name ?: (e as? HushException.App)?.reason ?: ""
+                        drop.copy(
+                            running = false,
+                            error = when {
+                                reason == "Decrypt" -> R.string.drop_wrong_key
+                                reason == "Expired" -> R.string.expired_link
+                                reason.contains("not on its servers") -> R.string.drop_gone
+                                else -> R.string.drop_failed
+                            },
+                        )
+                    },
+                )
+            }
         }
     }
 

@@ -153,6 +153,8 @@ pub enum Cmd {
     SetName(String),
     SetTtl(u64),
     SetLocal(bool),
+    /// Blob servers for sealed copies (empty: files only travel peer to peer).
+    SetBlossom(Vec<String>),
     SetNetwork {
         signal: crate::signal::SignalConfig,
         ice_servers: Vec<crate::rtc::IceServer>,
@@ -601,6 +603,7 @@ impl Engine {
                 }
             }
             Cmd::SetTtl(ttl) => self.cfg.ttl = ttl.min(proto::MAX_TTL),
+            Cmd::SetBlossom(servers) => self.cfg.blossom = servers,
             Cmd::SetLocal(on) => {
                 self.cfg.local = on;
                 if !on {

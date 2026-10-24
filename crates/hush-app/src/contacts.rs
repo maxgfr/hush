@@ -93,6 +93,13 @@ pub enum Cmd {
     EnsureIdentity {
         reply: Reply<String>,
     },
+    /// What sealing a drop to people needs: the signed prekeys `(spk, epoch)` of these contacts
+    /// (by key), and ours when `me`; and our seed, which signs it (and opens drops sealed to us).
+    SealKeys {
+        contacts: Vec<String>,
+        me: bool,
+        reply: Reply<SealKeys>,
+    },
     SetReachable(bool),
     AddById {
         id: String,
@@ -103,6 +110,12 @@ pub enum Cmd {
     Decline {
         id: String,
     },
+}
+
+/// Keys for a drop sealed to people (see [`Cmd::SealKeys`]).
+pub struct SealKeys {
+    pub keys: Vec<(Vec<u8>, u32)>,
+    pub seed: [u8; 32],
 }
 
 /// One contact handshake in flight, by the chat it will open.
@@ -401,6 +414,27 @@ impl Engine {
                     self.watch();
                     self.emit(Event::Identity(self.me().map(|m| m.public().id())));
                 }
+                let _ = reply.send(r);
+            }
+            Cmd::SealKeys { contacts, me, reply } => {
+                let r = (|| {
+                    let name = self.name();
+                    let seed = *self.store.ensure_identity(&name)?.seed();
+                    let mut keys = Vec::new();
+                    for key in &contacts {
+                        let c = self.store.contact(key).ok_or_else(|| anyhow!("not a contact"))?;
+                        let b = crate::util::from_b64u(&c.bundle)
+                            .and_then(|b| hush_core::bundle::Bundle::parse_stored(&b).ok())
+                            .ok_or_else(|| anyhow!("the contact's keys do not verify"))?;
+                        keys.push((b.spk, b.spk_epoch));
+                    }
+                    if me {
+                        let id = hush_core::identity::Identity::from_seed(seed);
+                        let epoch = hush_core::identity::Identity::spk_epoch(hush_core::utc_day(now_ms()));
+                        keys.push((id.spk(epoch).public(), epoch));
+                    }
+                    Ok(SealKeys { keys, seed })
+                })();
                 let _ = reply.send(r);
             }
             Cmd::SetReachable(on) => self.set_reachable(on),

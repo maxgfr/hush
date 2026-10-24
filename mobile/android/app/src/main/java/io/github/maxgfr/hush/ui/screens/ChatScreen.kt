@@ -540,7 +540,7 @@ private fun FileCard(vm: MainViewModel, chat: ChatState, f: FileItem) {
  * Hands a received file to an app the user picks, read-only, through the FileProvider. Its type
  * comes from its saved name, never from what the sender declared.
  */
-private fun openFile(context: Context, path: String) {
+internal fun openFile(context: Context, path: String) {
     val file = File(path)
     val uri = try {
         FileProvider.getUriForFile(context, "${context.packageName}.files", file)

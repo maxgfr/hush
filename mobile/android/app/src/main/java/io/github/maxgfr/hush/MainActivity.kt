@@ -32,6 +32,8 @@ import io.github.maxgfr.hush.ui.components.ClipboardExpiry
 import io.github.maxgfr.hush.ui.components.NoKeyboardLearning
 import io.github.maxgfr.hush.ui.screens.ChatScreen
 import io.github.maxgfr.hush.ui.screens.ContactsScreen
+import io.github.maxgfr.hush.ui.screens.DropReceiveScreen
+import io.github.maxgfr.hush.ui.screens.DropScreen
 import io.github.maxgfr.hush.ui.screens.EndedScreen
 import io.github.maxgfr.hush.ui.screens.HomeScreen
 import io.github.maxgfr.hush.ui.screens.IdentityScreen
@@ -99,6 +101,8 @@ private fun Root(vm: MainViewModel) {
                 Screen.Contacts -> ContactsScreen(vm, state)
                 Screen.Identity -> IdentityScreen(vm, state, settings)
                 Screen.Settings -> SettingsScreen(vm, settings)
+                Screen.Drop -> DropScreen(vm)
+                is Screen.DropReceive -> DropReceiveScreen(vm, s.link)
             }
             SnackbarHost(
                 snackbar,

@@ -68,6 +68,8 @@ struct RootView: View {
                     case .contacts: ContactsView()
                     case .identity: IdentityView()
                     case .settings: SettingsView()
+                    case .drop: DropView()
+                    case let .dropReceive(link): DropReceiveView(link: link)
                     }
                 }
         }

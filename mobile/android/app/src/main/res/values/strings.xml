@@ -201,4 +201,26 @@
         <item quantity="one">Backup imported: %1$d contact.</item>
         <item quantity="other">Backup imported: %1$d contacts.</item>
     </plurals>
+    <string name="send_files">Send files</string>
+    <string name="pick_files">Choose files</string>
+    <string name="drop_once">Delete after the first download</string>
+    <string name="drop_hint">The files are encrypted on this phone. A sealed copy waits on public blob servers, which only ever see ciphertext, until the link expires.</string>
+    <string name="seal_and_send">Encrypt and create the link</string>
+    <string name="drop_failed">The files could not be sent or received. Check the connection and try again.</string>
+    <string name="drop_sealing">Encrypting…</string>
+    <string name="drop_uploading">Uploading the sealed copy…</string>
+    <string name="drop_downloading">Downloading…</string>
+    <string name="drop_ready">The sealed copy is online: it works without you, for %1$s.</string>
+    <string name="files_for_you">Files for you</string>
+    <string name="drop_from">From %1$s (signature verified)</string>
+    <string name="drop_saved">Saved, every byte verified</string>
+    <string name="drop_deleted">One-time link: the copy was deleted from the servers.</string>
+    <string name="drop_receive_hint">Someone sent you files. They are downloaded from their sealed copy and decrypted on this phone.</string>
+    <string name="download_all">Download</string>
+    <string name="drop_wrong_key">Wrong passphrase, or this drop is not sealed to you.</string>
+    <string name="drop_gone">This drop is no longer on its servers: already downloaded, deleted or expired.</string>
+    <plurals name="files_picked_n">
+        <item quantity="one">%d file chosen</item>
+        <item quantity="other">%d files chosen</item>
+    </plurals>
 </resources>

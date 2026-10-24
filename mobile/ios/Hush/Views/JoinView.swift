@@ -84,6 +84,11 @@ struct JoinView: View {
     }
 
     private func submit(_ text: String) {
+        // A drop's files come from its sealed copy: its own screen.
+        if DropModel.isDrop(text) {
+            router.path.append(.dropReceive(text.trimmingCharacters(in: .whitespacesAndNewlines)))
+            return
+        }
         Task {
             if let chat = await model.submit(text, store: store) { router.show(chat: chat) }
         }

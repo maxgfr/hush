@@ -10,6 +10,8 @@ enum Route: Hashable {
     case contacts
     case identity
     case settings
+    case drop
+    case dropReceive(String)
 }
 
 @MainActor
@@ -29,8 +31,13 @@ final class Router {
     /// A hush link opened from elsewhere (a universal link, a code scanned by the camera app).
     @discardableResult
     func open(_ url: URL) -> Bool {
-        guard JoinModel.isLink(url.absoluteString) else { return false }
-        path = [.join(url.absoluteString)]
+        let text = url.absoluteString
+        if DropModel.isDrop(text) {
+            path = [.dropReceive(text)]
+            return true
+        }
+        guard JoinModel.isLink(text) else { return false }
+        path = [.join(text)]
         return true
     }
 }
@@ -204,5 +211,80 @@ final class AddByIdModel {
 
     func status(in state: HushState) -> LookupModel? {
         pending.flatMap { state.lookups[$0] }
+    }
+}
+
+/// Sending files by link, or receiving a drop: sealed on blob servers that only see ciphertext.
+@MainActor
+@Observable
+final class DropModel {
+    var files: [URL] = []
+    var minutes: UInt64 = 1440
+    var once = true
+    var passphrase = ""
+    var busy = false
+    var phase: DropPhase?
+    var done: UInt64 = 0
+    var total: UInt64 = 0
+    var url: String?
+    var expiresMs: UInt64 = 0
+    var saved: [String] = []
+    var sender: String?
+    var deleted = false
+    var error: LocalizedStringResource?
+
+    /// A link whose files come from a sealed copy (a drop link with one, or a drop sealed to us).
+    static func isDrop(_ text: String) -> Bool {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if isSealedDrop(input: t) { return true }
+        guard let info = try? linkInfo(input: t) else { return false }
+        return info.drop && info.sealedCopy
+    }
+
+    static func needsPassphrase(_ text: String) -> Bool {
+        (try? linkInfo(input: text.trimmingCharacters(in: .whitespacesAndNewlines)))?.passphrase ?? false
+    }
+
+    private func report() -> @Sendable (DropPhase, UInt64, UInt64) -> Void {
+        { phase, done, total in
+            Task { @MainActor in
+                self.phase = phase
+                self.done = done
+                self.total = total
+            }
+        }
+    }
+
+    func send(_ store: HushStore) async {
+        guard !files.isEmpty, !busy else { return }
+        busy = true
+        error = nil
+        defer { busy = false }
+        do {
+            let sent = try await store.sendDrop(files, minutes: minutes, once: once, passphrase: passphrase, progress: report())
+            url = sent.url
+            expiresMs = sent.expiresMs
+        } catch {
+            self.error = "dropFailed"
+        }
+    }
+
+    func receive(_ link: String, store: HushStore) async {
+        guard !busy else { return }
+        busy = true
+        error = nil
+        defer { busy = false }
+        do {
+            let got = try await store.receiveDrop(link, passphrase: passphrase, progress: report())
+            saved = got.paths
+            sender = got.sender
+            deleted = got.deleted
+        } catch HushError.Core(name: "Decrypt") {
+            error = "dropWrongKey"
+        } catch HushError.Core(name: "Expired") {
+            error = "expiredLink"
+        } catch {
+            error = "\(error)".contains("not on its servers") ? "dropGone" : "dropFailed"
+        }
     }
 }

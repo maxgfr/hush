@@ -32,6 +32,9 @@ class Engine(context: Context) {
     /** Copies of the files we offer, which the engine reads when someone downloads them. */
     private val outgoingDir: File
 
+    /** Plain copies of the files of a drop, while it is sealed (deleted right after). */
+    val dropsDir: File get() = File(outgoingDir, "drops")
+
     init {
         val ctx = context.applicationContext
         defaults = Settings(

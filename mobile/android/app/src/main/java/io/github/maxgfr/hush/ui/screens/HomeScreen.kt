@@ -65,6 +65,17 @@ fun HomeScreen(vm: MainViewModel, state: UiState, settings: Settings) {
             Spacer(Modifier.width(8.dp))
             Text(stringResource(R.string.new_conversation))
         }
+        OutlinedButton(
+            onClick = {
+                vm.newDrop()
+                vm.go(Screen.Drop)
+            },
+            modifier = Modifier.fillMaxWidth().height(52.dp),
+        ) {
+            HIcon(R.drawable.ic_attach)
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(R.string.send_files))
+        }
         OutlinedButton(onClick = { vm.go(Screen.Join()) }, modifier = Modifier.fillMaxWidth().height(52.dp)) {
             HIcon(R.drawable.ic_qr)
             Spacer(Modifier.width(8.dp))

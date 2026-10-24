@@ -715,6 +715,23 @@
         }
       }
     },
+    "downloadAll": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Download"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Télécharger"
+          }
+        }
+      }
+    },
     "downloading %lld": {
       "extractionState": "manual",
       "localizations": {
@@ -728,6 +745,227 @@
           "stringUnit": {
             "state": "translated",
             "value": "Réception… %lld %%"
+          }
+        }
+      }
+    },
+    "dropDeleted": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "One-time link: the copy was deleted from the servers."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lien à usage unique : la copie a été supprimée des serveurs."
+          }
+        }
+      }
+    },
+    "dropDownloading": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Downloading…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Téléchargement…"
+          }
+        }
+      }
+    },
+    "dropFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The files could not be sent or received. Check the connection and try again."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible d'envoyer ou de recevoir les fichiers. Vérifiez la connexion et réessayez."
+          }
+        }
+      }
+    },
+    "dropFrom %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "From %@ (signature verified)"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "De %@ (signature vérifiée)"
+          }
+        }
+      }
+    },
+    "dropGone": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This drop is no longer on its servers: already downloaded, deleted or expired."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce dépôt n'est plus sur ses serveurs : déjà téléchargé, supprimé ou expiré."
+          }
+        }
+      }
+    },
+    "dropHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The files are encrypted on this phone. A sealed copy waits on public blob servers, which only ever see ciphertext, until the link expires."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les fichiers sont chiffrés sur ce téléphone. Une copie chiffrée attend sur des serveurs publics, qui ne voient que du chiffré, jusqu'à l'expiration du lien."
+          }
+        }
+      }
+    },
+    "dropOnce": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete after the first download"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Supprimer après le premier téléchargement"
+          }
+        }
+      }
+    },
+    "dropReady": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The sealed copy is online: the link works without you."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La copie chiffrée est en ligne : le lien marche sans vous."
+          }
+        }
+      }
+    },
+    "dropReceiveHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Someone sent you files. They are downloaded from their sealed copy and decrypted on this phone."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "On vous a envoyé des fichiers. Ils sont téléchargés depuis leur copie chiffrée et déchiffrés sur ce téléphone."
+          }
+        }
+      }
+    },
+    "dropSaved": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saved, every byte verified"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enregistré, chaque octet vérifié"
+          }
+        }
+      }
+    },
+    "dropSealing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Encrypting…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chiffrement…"
+          }
+        }
+      }
+    },
+    "dropUploading": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uploading the sealed copy…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Envoi de la copie chiffrée…"
+          }
+        }
+      }
+    },
+    "dropWrongKey": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wrong passphrase, or this drop is not sealed to you."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mauvais mot de passe, ou ce dépôt n'est pas scellé pour vous."
           }
         }
       }
@@ -898,6 +1136,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Fichiers"
+          }
+        }
+      }
+    },
+    "filesForYou": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Files for you"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Des fichiers pour vous"
           }
         }
       }
@@ -1803,6 +2058,23 @@
         }
       }
     },
+    "pickFiles": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose files"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choisir des fichiers"
+          }
+        }
+      }
+    },
     "protectedLink": {
       "extractionState": "manual",
       "localizations": {
@@ -2126,6 +2398,23 @@
         }
       }
     },
+    "sealAndSend": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Encrypt and create the link"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chiffrer et créer le lien"
+          }
+        }
+      }
+    },
     "searching %@": {
       "extractionState": "manual",
       "localizations": {
@@ -2173,6 +2462,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Envoyer"
+          }
+        }
+      }
+    },
+    "sendFiles": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Send files"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Envoyer des fichiers"
           }
         }
       }

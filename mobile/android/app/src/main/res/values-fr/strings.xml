@@ -199,4 +199,26 @@
         <item quantity="many">Sauvegarde importée : %1$d contacts.</item>
         <item quantity="other">Sauvegarde importée : %1$d contacts.</item>
     </plurals>
+    <string name="send_files">Envoyer des fichiers</string>
+    <string name="pick_files">Choisir des fichiers</string>
+    <string name="drop_once">Supprimer après le premier téléchargement</string>
+    <string name="drop_hint">Les fichiers sont chiffrés sur ce téléphone. Une copie chiffrée attend sur des serveurs publics, qui ne voient que du chiffré, jusqu\'à l\'expiration du lien.</string>
+    <string name="seal_and_send">Chiffrer et créer le lien</string>
+    <string name="drop_failed">Impossible d\'envoyer ou de recevoir les fichiers. Vérifiez la connexion et réessayez.</string>
+    <string name="drop_sealing">Chiffrement…</string>
+    <string name="drop_uploading">Envoi de la copie chiffrée…</string>
+    <string name="drop_downloading">Téléchargement…</string>
+    <string name="drop_ready">La copie chiffrée est en ligne : le lien marche sans vous, pendant %1$s.</string>
+    <string name="files_for_you">Des fichiers pour vous</string>
+    <string name="drop_from">De %1$s (signature vérifiée)</string>
+    <string name="drop_saved">Enregistré, chaque octet vérifié</string>
+    <string name="drop_deleted">Lien à usage unique : la copie a été supprimée des serveurs.</string>
+    <string name="drop_receive_hint">On vous a envoyé des fichiers. Ils sont téléchargés depuis leur copie chiffrée et déchiffrés sur ce téléphone.</string>
+    <string name="download_all">Télécharger</string>
+    <string name="drop_wrong_key">Mauvais mot de passe, ou ce dépôt n\'est pas scellé pour vous.</string>
+    <string name="drop_gone">Ce dépôt n\'est plus sur ses serveurs : déjà téléchargé, supprimé ou expiré.</string>
+    <plurals name="files_picked_n">
+        <item quantity="one">%d fichier choisi</item>
+        <item quantity="other">%d fichiers choisis</item>
+    </plurals>
 </resources>

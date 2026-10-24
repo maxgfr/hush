@@ -4,6 +4,19 @@ import Observation
 /// The web app's address: links we create start with it, and opening one opens the app.
 public let linkBase = "https://maxgfr.github.io/hush/"
 
+/// Hands a drop's progress to the caller, from the engine's thread.
+final class DropProgressRelay: DropProgress, @unchecked Sendable {
+    let report: @Sendable (DropPhase, UInt64, UInt64) -> Void
+
+    init(_ report: @escaping @Sendable (DropPhase, UInt64, UInt64) -> Void) {
+        self.report = report
+    }
+
+    func onProgress(phase: DropPhase, done: UInt64, total: UInt64) {
+        report(phase, done, total)
+    }
+}
+
 /// Hops engine events to the main queue, in order.
 final class EventRelay: AppListener, @unchecked Sendable {
     weak var store: HushStore?
@@ -163,6 +176,44 @@ public final class HushStore {
     public func sendFile(_ data: Data, name: String, in chat: UInt64) throws {
         let copy = try storage.stage(data, name: name, chat: chat)
         engine.sendFile(chat: chat, path: copy.path)
+    }
+
+    // MARK: drops
+
+    /// Where the plain copies of a drop wait while it is sealed: no conversation has this id.
+    private static let dropStaging = UInt64.max
+
+    /// Seals picked files on blob servers and returns the link to share (a few seconds per
+    /// hundred megabytes, off the main actor).
+    public func sendDrop(
+        _ urls: [URL],
+        minutes: UInt64,
+        once: Bool,
+        passphrase: String?,
+        progress: @escaping @Sendable (DropPhase, UInt64, UInt64) -> Void
+    ) async throws -> DropSent {
+        let pass = passphrase.flatMap { $0.isEmpty ? nil : $0 }
+        let paths = try urls.map { try storage.stage($0, chat: Self.dropStaging).path }
+        defer { storage.unstage(chat: Self.dropStaging) }
+        let relay = DropProgressRelay(progress)
+        return try await off {
+            try $0.sendDrop(
+                paths: paths, ttlMin: minutes, once: once, passphrase: pass, toContacts: [], toSelf: false,
+                servers: defaultBlobServers(), base: linkBase, progressTo: relay
+            )
+        }
+    }
+
+    /// Downloads a drop's sealed copy into the received files (resumes an interrupted one).
+    public func receiveDrop(
+        _ link: String,
+        passphrase: String?,
+        progress: @escaping @Sendable (DropPhase, UInt64, UInt64) -> Void
+    ) async throws -> DropReceived {
+        let pass = passphrase.flatMap { $0.isEmpty ? nil : $0 }
+        let out = storage.received.path
+        let relay = DropProgressRelay(progress)
+        return try await off { try $0.receiveDrop(link: link, passphrase: pass, outDir: out, progressTo: relay) }
     }
 
     public func download(_ file: String, in chat: UInt64) {

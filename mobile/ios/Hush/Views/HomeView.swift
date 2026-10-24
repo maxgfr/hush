@@ -22,6 +22,10 @@ struct HomeView: View {
                     Label("newConversation", systemImage: "link")
                 }
                 .accessibilityIdentifier("new-conversation")
+                NavigationLink(value: Route.drop) {
+                    Label("sendFiles", systemImage: "paperplane")
+                }
+                .accessibilityIdentifier("send-files")
                 NavigationLink(value: Route.join(nil)) {
                     Label("joinWithLink", systemImage: "qrcode.viewfinder")
                 }

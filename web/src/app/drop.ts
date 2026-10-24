@@ -402,8 +402,9 @@ export class IncomingDrop {
       } else {
         throw new Error("senderGone");
       }
+      // The conversation stays open until the page leaves: the acknowledgements (`file-end`)
+      // must reach the sender, who shows "delivered".
       this.state.value = "done";
-      this.conv?.end();
       if (m?.once && this.locator)
         this.deleted.value = await deleteDrop(m, this.locator).catch(() => false);
     } catch (e) {
