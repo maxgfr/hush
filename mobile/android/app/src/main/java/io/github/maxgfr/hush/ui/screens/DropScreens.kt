@@ -55,7 +55,7 @@ fun DropScreen(vm: MainViewModel) {
     val d = vm.drop
     var picked by remember { mutableStateOf(listOf<android.net.Uri>()) }
     var ttlMin by rememberSaveable { mutableLongStateOf(1_440L) }
-    var once by rememberSaveable { mutableStateOf(true) }
+    var once by rememberSaveable { mutableStateOf(false) }
     // Secrets are never saveable: the saved instance state outlives the process.
     var pass by remember { mutableStateOf("") }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) {

@@ -69,7 +69,7 @@ Useful flags:
 - `--ttl SECONDS` for disappearing messages.
 - `--relay-only --turn URL` to hide your IP address.
 - `--server HOST` (or `HUSH_BLOSSOM`) for the blob servers of sealed copies, `--no-servers` for none.
-- `--many` keeps a drop after its first download; `--expires MINUTES` (10 to 10080).
+- `--once` deletes a drop after its first download (it otherwise stays until it expires); `--expires MINUTES` (10 to 10080).
 - `--offline` to swap QR codes with no network.
 
 ## Phones

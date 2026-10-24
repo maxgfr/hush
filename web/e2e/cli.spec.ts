@@ -165,7 +165,6 @@ test("a browser drops files, the CLI receives them (peer to peer, then from the 
     { name: "a.bin", mimeType: "application/octet-stream", buffer: data },
     { name: "b.txt", mimeType: "text/plain", buffer: Buffer.from("b") },
   ]);
-  await alice.page.getByLabel("Delete after the first download").uncheck();
   await alice.page.getByTestId("drop-send").click();
   await expect(alice.page.getByTestId("drop-ready")).toBeVisible({ timeout: 30_000 });
   const link = (await alice.page.getByTestId("drop-link").textContent()) ?? "";

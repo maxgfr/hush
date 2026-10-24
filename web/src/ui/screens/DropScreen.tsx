@@ -78,7 +78,7 @@ function Picker(props: { onAdd: (e: DropEntry[]) => void; big?: boolean }): JSX.
 function Compose(props: { initial: DropEntry[] }): JSX.Element {
   const [entries, setEntries] = useState<DropEntry[]>(props.initial);
   const [ttlMin, setTtlMin] = useState(1440);
-  const [once, setOnce] = useState(true);
+  const [once, setOnce] = useState(false);
   const [pass, setPass] = useState("");
   const noServers = blossomServers().length === 0;
   const [p2pOnly, setP2pOnly] = useState(noServers);

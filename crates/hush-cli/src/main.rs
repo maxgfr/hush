@@ -65,7 +65,7 @@ enum Command {
         #[arg(required = true)]
         files: Vec<PathBuf>,
         /// Send them in this conversation link instead (peer to peer).
-        #[arg(long, conflicts_with_all = ["to", "to_self", "p2p_only", "many"])]
+        #[arg(long, conflicts_with_all = ["to", "to_self", "p2p_only", "once"])]
         link: Option<String>,
         /// Minutes before the link expires (10 to 10080).
         #[arg(long, default_value_t = 1440)]
@@ -73,8 +73,11 @@ enum Command {
         /// Never store a sealed copy: the link works only while this runs.
         #[arg(long)]
         p2p_only: bool,
-        /// Keep the sealed copy after the first download (several people can open the link).
+        /// Delete the sealed copy after the first download (otherwise it stays until it expires).
         #[arg(long)]
+        once: bool,
+        /// Kept for older scripts: several downloads are the default now.
+        #[arg(long, hide = true, conflicts_with = "once")]
         many: bool,
         /// Seal to a contact (name or hush1… identifier) instead of a link: only they can open it.
         /// Repeatable. Needs --identity.
@@ -599,7 +602,8 @@ async fn main() -> Result<()> {
             link: None,
             expires,
             p2p_only,
-            many,
+            once,
+            many: _,
             to,
             to_self,
             identity,
@@ -611,7 +615,7 @@ async fn main() -> Result<()> {
                 files,
                 expires_min: expires,
                 p2p_only: p2p_only || cfg.blossom.is_empty() && to.is_empty() && !to_self,
-                many,
+                many: !once,
                 to,
                 to_self,
                 identity,

@@ -220,7 +220,7 @@ final class AddByIdModel {
 final class DropModel {
     var files: [URL] = []
     var minutes: UInt64 = 1440
-    var once = true
+    var once = false
     var passphrase = ""
     var busy = false
     var phase: DropPhase?

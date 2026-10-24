@@ -57,7 +57,10 @@ const fr = {
   dropDeletedNote: "Lien à usage unique : la copie a été supprimée des serveurs.",
   wrongPassphrase: "Mauvais mot de passe.",
   dropExpired: "Ce dépôt a expiré.",
-  dropGone: "Ce dépôt n'est plus sur ses serveurs : déjà téléchargé, supprimé ou expiré.",
+  dropGone:
+    "Ce dépôt n'est plus sur ses serveurs : il a déjà été téléchargé (lien à usage unique), l'expéditeur l'a supprimé, ou il a expiré.",
+  dropGoneWait:
+    "Si l'expéditeur a encore sa page ouverte, les fichiers arriveront directement ici.",
   senderGone: "L'expéditeur n'est plus en ligne et ce lien n'a pas de copie.",
   downloadFailed: "Le téléchargement a échoué. Réessayez.",
   notForYou: "Ce dépôt n'est pas scellé pour vous.",
@@ -119,7 +122,9 @@ const en: Record<DropKey, string> = {
   dropDeletedNote: "One-time link: the copy was deleted from the servers.",
   wrongPassphrase: "Wrong passphrase.",
   dropExpired: "This drop has expired.",
-  dropGone: "This drop is no longer on its servers: already downloaded, deleted or expired.",
+  dropGone:
+    "This drop is no longer on its servers: it was already downloaded (one-time link), the sender deleted it, or it expired.",
+  dropGoneWait: "If the sender still has their page open, the files will come straight here.",
   senderGone: "The sender is no longer online and this link has no copy.",
   downloadFailed: "The download failed. Try again.",
   notForYou: "This drop is not sealed to you.",

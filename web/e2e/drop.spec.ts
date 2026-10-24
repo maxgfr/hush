@@ -24,6 +24,7 @@ test("a folder dropped between two browsers goes peer to peer while both are the
   await alice.page.getByTestId("home-send-files").click();
   await alice.page.getByTestId("drop-folder").setInputFiles(join(dir, "album"));
   await expect(alice.page.getByText("album/sub/note.txt")).toBeVisible();
+  await alice.page.getByLabel("Delete after the first download").check();
   await alice.page.getByTestId("drop-send").click();
   await expect(alice.page.getByTestId("drop-ready")).toBeVisible({ timeout: 30_000 });
   const link = (await alice.page.getByTestId("drop-link").textContent()) ?? "";
@@ -59,6 +60,7 @@ test("the sealed copy waits behind a passphrase, and a one-time link works once"
     .getByTestId("drop-files")
     .setInputFiles({ name: "contrat.pdf", mimeType: "application/pdf", buffer: data });
   await alice.page.getByLabel("Passphrase (optional)").fill("deux mots");
+  await alice.page.getByLabel("Delete after the first download").check();
   await alice.page.getByTestId("drop-send").click();
   await expect(alice.page.getByTestId("drop-ready")).toBeVisible({ timeout: 30_000 });
   const link = ((await alice.page.getByTestId("drop-link").textContent()) ?? "").replace(

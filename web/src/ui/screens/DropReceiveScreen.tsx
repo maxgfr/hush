@@ -52,7 +52,14 @@ export function DropReceiveScreen(): JSX.Element {
           </p>
         )}
         {state === "opening" && !error && <p class="faint">{t("opening")}</p>}
-        {waiting && state !== "opening" && <p class="faint">{t("dropWaitingSender")}</p>}
+        {waiting && error && (
+          <p class="error" role="alert">
+            {t(error as DropKey)}
+          </p>
+        )}
+        {waiting && state !== "opening" && (
+          <p class="faint">{t(error === "dropGone" ? "dropGoneWait" : "dropWaitingSender")}</p>
+        )}
         {files.length > 0 && (
           <>
             <p class="row-between">
@@ -74,14 +81,16 @@ export function DropReceiveScreen(): JSX.Element {
             {m?.once && <p class="hint">{t("dropOnceShort")}</p>}
           </>
         )}
-        <p class="status-line">
-          <span class={`dot${drop.online.value || drop.source.value === "p2p" ? " on" : ""}`} />
-          {drop.source.value === "p2p" || (!drop.source.value && drop.online.value)
-            ? t("dropSenderOnline")
-            : m
-              ? t("dropFromCopy")
-              : t("dropWaitingSender")}
-        </p>
+        {!waiting && (
+          <p class="status-line">
+            <span class={`dot${drop.online.value || drop.source.value === "p2p" ? " on" : ""}`} />
+            {drop.source.value === "p2p" || (!drop.source.value && drop.online.value)
+              ? t("dropSenderOnline")
+              : m
+                ? t("dropFromCopy")
+                : t("dropWaitingSender")}
+          </p>
+        )}
         {state === "downloading" && (
           <div class="progress">
             <progress value={drop.progress.value} max={1} />
@@ -95,7 +104,7 @@ export function DropReceiveScreen(): JSX.Element {
           </p>
         )}
         {state === "done" && drop.deleted.value && <p class="hint">{t("dropDeletedNote")}</p>}
-        {error && (
+        {!waiting && error && (
           <p class="error" role="alert">
             {t(error as DropKey)}
           </p>
