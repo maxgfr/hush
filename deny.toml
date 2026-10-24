@@ -10,6 +10,12 @@ unmaintained = "all"
 ignore = [
     # `basic-toml`, pulled in by uniffi's build-time macros; only reads the crate's own uniffi.toml.
     { id = "RUSTSEC-2026-0374", reason = "build-time only, parses our own config" },
+    # Timing variability in `crypto-bigint` 0.5, through `ecdsa` 0.16: `k256` signs Nostr events and
+    # Blossom authorizations with throwaway keys (one per session or drop, never a long-lived secret),
+    # and `p256` runs WebRTC's DTLS key exchange, whose ephemeral keys hush's own end-to-end
+    # encryption does not rely on. No release of the 0.5 line is fixed; drop this once k256/p256
+    # and webrtc move to `crypto-bigint` 0.7.
+    { id = "RUSTSEC-2026-0387", reason = "throwaway signing keys and DTLS ephemerals only; no fixed 0.5 release" },
 ]
 
 [licenses]
