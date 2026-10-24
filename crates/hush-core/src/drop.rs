@@ -799,6 +799,48 @@ mod tests {
         assert_eq!(opened.open_segment(0, &s0).unwrap_err(), Error::Decrypt);
     }
 
+    /// What servers store shows nothing of the files: no name, no pattern of the content, and
+    /// bytes indistinguishable from random even for a file of a single repeated byte.
+    #[test]
+    fn nothing_in_clear() {
+        let name = "rapport-confidentiel-2026.pdf";
+        let zeros = vec![0u8; SEGMENT + 4096];
+        let pattern: Vec<u8> = b"ATTACK AT DAWN ".iter().copied().cycle().take(100_000).collect();
+        let (header, segments, _) = make(
+            &[(name, &zeros), ("notes.txt", &pattern)],
+            &[Recipient::Secret(&[7; 32])],
+            None,
+        );
+        let stored: Vec<&[u8]> = std::iter::once(header.as_slice())
+            .chain(segments.iter().map(Vec::as_slice))
+            .collect();
+        for blob in &stored {
+            for needle in [name.as_bytes(), b"notes.txt", b"ATTACK AT DAWN", b"text/plain"] {
+                assert!(!blob.windows(needle.len()).any(|w| w == needle));
+            }
+        }
+        for seg in &segments {
+            // No 8-byte block repeats (ECB-like leaks), and every byte value is about as frequent
+            // as the others: a chi-squared test over 256 values (99.99% bound: about 375).
+            let mut seen = std::collections::HashSet::new();
+            assert!(seg.chunks_exact(8).all(|c| seen.insert(c)), "a repeated block");
+            let mut counts = [0f64; 256];
+            for &b in seg.iter() {
+                counts[usize::from(b)] += 1.0;
+            }
+            let expected = seg.len() as f64 / 256.0;
+            let chi2: f64 = counts.iter().map(|c| (c - expected).powi(2) / expected).sum();
+            assert!(chi2 < 375.0, "bytes are not uniform: chi² = {chi2}");
+        }
+        // Two drops of the same files share no byte pattern: fresh keys each time.
+        let (_, again, _) = make(
+            &[(name, &zeros), ("notes.txt", &pattern)],
+            &[Recipient::Secret(&[7; 32])],
+            None,
+        );
+        assert_ne!(again[0][..64], segments[0][..64]);
+    }
+
     #[test]
     fn deterministic_segments() {
         let mut rng = crate::test_rng::rng();

@@ -39,6 +39,17 @@ An identifier is `hush1` + bech32m(SHA-256(Ed25519 public key ‖ ML-DSA-65 publ
 - Signatures are hybrid and conjunctive: Ed25519 **and** ML-DSA-65 must both verify, over a message that includes the identifier.
 - A contact card signs the session's transcript hash, so it cannot be replayed into another conversation.
 
+## Files
+
+| How a file travels | Encryption | Same as a message? |
+|---|---|---|
+| In a conversation, peer to peer | The session itself: X-Wing handshake, a key per frame, a post-quantum rekey every 5 minutes | Identical: same keys, same forward secrecy |
+| In a conversation, through a sealed copy (no direct path) | ChaCha20-Poly1305 under a random 256-bit file key; the key only travels inside the session | The key has the session's protection; the stored blobs are only as long-lived as the conversation (deleted when it ends) |
+| A drop link | The same AEAD under a random 256-bit file key, wrapped by a key derived from the link's 256-bit secret (and Argon2id of the passphrase) | Same ciphers and strength (256-bit keys, safe against quantum computers), but **no forward secrecy**: whoever later holds the link (and its passphrase) and a copy of the blobs can open them |
+| A drop sealed to people | The file key wrapped by X-Wing to each recipient's prekey, signed with Ed25519 and ML-DSA-65 | Post-quantum like a contact handshake, and like its first message without forward secrecy: the prekeys derive from the identity seed |
+
+Everything stored is ciphertext: file names, types, sizes and hashes are inside the encrypted manifest, every segment is a 4 MiB blob indistinguishable from random bytes (`drop::tests::nothing_in_clear`), and each drop has fresh keys. What a stored drop cannot have is forward secrecy, since nobody is online to agree on a fresh key: keep drop links short-lived and one-time, add a passphrase given another way, or send peer to peer only when that matters.
+
 ## Who sees what
 
 | Observer | Sees | Never sees |

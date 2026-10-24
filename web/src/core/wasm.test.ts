@@ -54,7 +54,9 @@ describe("the Rust core from JavaScript", () => {
     const id = core.Identity.generate();
     expect(id.id).toMatch(/^hush1[a-z0-9]{59}$/);
     expect([...core.idDecode(id.id)]).toEqual([...id.idHash]);
-    expect(() => core.idDecode(`${id.id.slice(0, 30)}q${id.id.slice(31)}`)).toThrow();
+    // A typo: another character in place of the 31st (never the same one, or nothing changes).
+    const typo = id.id[30] === "q" ? "p" : "q";
+    expect(() => core.idDecode(`${id.id.slice(0, 30)}${typo}${id.id.slice(31)}`)).toThrow();
     const again = core.Identity.fromSeed(id.seed());
     expect(again.id).toBe(id.id);
   });
