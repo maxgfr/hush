@@ -2048,6 +2048,30 @@ impl Engine {
         let Some(meta) = p.drop_wait.get(&d.id).cloned() else {
             return;
         };
+        // Only from servers we chose ourselves: a peer must not make us contact a server of its
+        // choosing (it would learn our IP address, which TURN-only mode hides).
+        let servers: Vec<String> = d
+            .locator
+            .servers
+            .iter()
+            .filter(|h| self.cfg.blossom.contains(h))
+            .cloned()
+            .collect();
+        if servers.is_empty() {
+            if let Some(p) = self.chats.get_mut(&chat).and_then(|c| c.peers.get_mut(tag)) {
+                p.drop_wait.remove(&d.id);
+            }
+            self.emit(Event::FileFailed {
+                chat,
+                id: d.id,
+                reason: "the sender's file servers are not among yours".into(),
+            });
+            return;
+        }
+        let d = FileDrop {
+            locator: Locator::new(d.locator.header, servers).expect("a subset of valid hosts"),
+            ..d
+        };
         let (http, tx, events) = (self.blossom.clone(), self.internal_tx.clone(), self.events.clone());
         let tag = *tag;
         tokio::spawn(async move {

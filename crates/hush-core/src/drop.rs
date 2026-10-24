@@ -111,12 +111,16 @@ impl Manifest {
 }
 
 /// Whether a path is safe to recreate under a download folder: relative, `/`-separated, no empty,
-/// `.` or `..` component, no backslash, NUL or control character, at most [`MAX_PATH`] bytes.
+/// `.` or `..` component, no backslash, NUL or control character, no zero-width or bidirectional
+/// override (which could show `report\u{202e}fdp.exe` as `reportexe.pdf`), at most [`MAX_PATH`]
+/// bytes.
 #[must_use]
 pub fn valid_path(path: &str) -> bool {
     !path.is_empty()
         && path.len() <= MAX_PATH
-        && !path.chars().any(|c| c.is_control() || c == '\\')
+        && !path
+            .chars()
+            .any(|c| c.is_control() || c == '\\' || crate::bundle::SPOOFING.contains(&c))
         && path.split('/').all(|c| !c.is_empty() && c != "." && c != "..")
 }
 
@@ -811,7 +815,18 @@ mod tests {
 
     #[test]
     fn manifests_are_checked() {
-        for bad in ["", "/etc/passwd", "a/../b", "./a", "a//b", "a\\b", "a\u{0}b", "a/\n"] {
+        for bad in [
+            "",
+            "/etc/passwd",
+            "a/../b",
+            "./a",
+            "a//b",
+            "a\\b",
+            "a\u{0}b",
+            "a/\n",
+            "x\u{202e}fdp.exe",
+            "a\u{200b}b",
+        ] {
             assert!(!valid_path(bad), "{bad:?}");
         }
         for good in ["a", "dir/sub/file.txt", "été .pdf", "..a", "a.."] {

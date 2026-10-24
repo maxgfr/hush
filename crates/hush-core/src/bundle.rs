@@ -36,7 +36,7 @@ pub struct Bundle {
 }
 
 /// Zero-width and bidirectional-override characters that could make one name pass for another.
-const SPOOFING: [char; 15] = [
+pub(crate) const SPOOFING: [char; 15] = [
     '\u{200b}', '\u{200c}', '\u{200d}', '\u{200e}', '\u{200f}', '\u{202a}', '\u{202b}', '\u{202c}', '\u{202d}',
     '\u{202e}', '\u{2066}', '\u{2067}', '\u{2068}', '\u{2069}', '\u{feff}',
 ];

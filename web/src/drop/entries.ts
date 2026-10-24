@@ -4,6 +4,7 @@
  * made valid for the core (`drop::valid_path`) and distinct. Kept apart from
  * the sealing code so the first screen can accept a drop without loading it.
  */
+import { UNSAFE } from "../app/protocol";
 import { hush } from "../core/wasm";
 
 export interface DropEntry {
@@ -26,9 +27,11 @@ function finish(entries: DropEntry[]): DropEntry[] {
       .filter((c) => c && c !== "." && c !== "..")
       .join("/")
       .replace(/\\/g, "_");
-    path = Array.from(path, (ch) =>
-      (ch.codePointAt(0) ?? 0) < 0x20 || ch === "\u007f" ? "_" : ch,
-    ).join("");
+    path = Array.from(path, (ch) => {
+      const c = ch.codePointAt(0) ?? 0;
+      // Control characters, and the zero-width and bidi ones the core refuses (they spoof names).
+      return c < 0x20 || (c >= 0x7f && c <= 0x9f) || UNSAFE.has(c) ? "_" : ch;
+    }).join("");
     if (!path || !core.dropValidPath(path)) path = e.file.name.replace(/[/\\]/g, "_") || "file";
     const dot = path.lastIndexOf(".");
     const [stem, ext] =

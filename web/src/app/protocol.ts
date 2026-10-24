@@ -70,7 +70,7 @@ export function validPath(p: unknown): p is string {
     new TextEncoder().encode(p).length <= 1024 &&
     !Array.from(p).some((ch) => {
       const c = ch.codePointAt(0) ?? 0;
-      return ch === "\\" || c < 0x20 || (c >= 0x7f && c <= 0x9f);
+      return ch === "\\" || c < 0x20 || (c >= 0x7f && c <= 0x9f) || UNSAFE.has(c);
     }) &&
     p.split("/").every((c) => c !== "" && c !== "." && c !== "..")
   );
@@ -88,7 +88,7 @@ function parse(data: Uint8Array): Record<string, unknown> | null {
 }
 
 /** Zero-width and bidirectional-override characters a peer could use to spoof the UI. */
-const UNSAFE = new Set([
+export const UNSAFE = new Set([
   0x200b, 0x200c, 0x200d, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067,
   0x2068, 0x2069, 0xfeff,
 ]);

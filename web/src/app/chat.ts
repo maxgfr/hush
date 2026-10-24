@@ -395,7 +395,14 @@ export abstract class Chat {
       fetchHeader,
       readManifest,
     } = await import("../drop/seal");
-    const servers = m.srv.map(cleanHost).filter((h): h is string => !!h);
+    // Only from servers we chose ourselves: a peer must not make us contact a server of its
+    // choosing (it would learn our IP address, which TURN-only mode hides).
+    const mine = new Set(blossomServers());
+    const servers = m.srv.map(cleanHost).filter((h): h is string => !!h && mine.has(h));
+    if (servers.length === 0) {
+      item.state.value = "failed";
+      return;
+    }
     const locator: Locator = { header: fromB64u(m.hdr), servers };
     try {
       const header = await fetchHeader(locator);
