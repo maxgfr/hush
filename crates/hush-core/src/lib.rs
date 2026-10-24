@@ -18,6 +18,7 @@ pub mod b64;
 pub mod backup;
 pub mod bundle;
 pub mod contact;
+pub mod drop;
 pub mod envelope;
 pub mod error;
 pub mod handshake;
