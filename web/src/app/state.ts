@@ -8,7 +8,7 @@ import type { Chat, ChatStatus } from "./chat";
 import { Contacts } from "./contacts";
 import { Conversation } from "./conversation";
 import type { IncomingDrop } from "./drop";
-import { settings, signalConfig } from "./settings";
+import { loadTurnCredential, settings, signalConfig } from "./settings";
 import { initStore } from "./store";
 
 export type View =
@@ -76,7 +76,7 @@ export async function boot(): Promise<void> {
     },
   );
   book = new Contacts(rdv, myName);
-  await initStore();
+  await Promise.all([initStore(), loadTurnCredential()]);
   ready.value = true;
   const fragment = takeFragment();
   if (fragment) openLink(fragment);

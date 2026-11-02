@@ -6,6 +6,8 @@ const fr = {
   noServer: "Aucun serveur, aucun compte, rien de conservé",
   reset: "Réinitialiser",
   saved: "Enregistré",
+  storageFull:
+    "Impossible d'enregistrer dans ce navigateur (stockage du site plein ou bloqué) : la modification sera perdue au rechargement.",
   intro:
     "Créez un lien, envoyez-le, discutez. Chiffré de bout en bout avec une cryptographie post-quantique, sans compte ni serveur. Quand vous terminez, tout disparaît.",
   newConversation: "Nouvelle conversation",
@@ -172,7 +174,7 @@ const fr = {
   stun: "Serveurs STUN",
   turn: "Serveur TURN (facultatif)",
   turnHint:
-    "Gardé en clair dans ce navigateur, lisible par les autres sites de maxgfr.github.io : choisissez un accès propre à ce relais.",
+    "Le mot de passe est chiffré dans ce navigateur, mais un autre site de maxgfr.github.io pourrait s'en servir : choisissez un accès propre à ce relais.",
   relayOnly: "Toujours passer par TURN (masque votre IP à votre correspondant)",
   networkHint:
     "Les relais et trackers ne voient qu'un sujet qui change chaque jour et du chiffré. Ils voient votre adresse IP, comme tout site web.",
@@ -207,6 +209,8 @@ const en: Record<Key, string> = {
   noServer: "No server, no account, nothing kept",
   reset: "Reset",
   saved: "Saved",
+  storageFull:
+    "Could not be stored in this browser (storage for this site is full or blocked): the change will be lost on reload.",
   intro:
     "Create a link, send it, talk. End-to-end encrypted with post-quantum cryptography, no account, no server. When you end it, everything is gone.",
   newConversation: "New conversation",
@@ -363,7 +367,7 @@ const en: Record<Key, string> = {
   stun: "STUN servers",
   turn: "TURN server (optional)",
   turnHint:
-    "Kept unencrypted in this browser, readable by the other sites of maxgfr.github.io: use a login made for this relay only.",
+    "The password is encrypted in this browser, but another site of maxgfr.github.io could still use it: use a login made for this relay only.",
   relayOnly: "Always go through TURN (hides your IP from the other person)",
   networkHint:
     "Relays and trackers only see a topic that changes daily and ciphertext. They see your IP address, like any website.",

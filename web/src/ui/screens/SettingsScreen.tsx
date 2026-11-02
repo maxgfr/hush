@@ -1,6 +1,6 @@
 import type { JSX } from "preact";
 import { useState } from "preact/hooks";
-import { DEFAULT_SETTINGS, saveSettings, settings } from "../../app/settings";
+import { DEFAULT_SETTINGS, saveSettings, saveTurn, settings } from "../../app/settings";
 import { go, transports } from "../../app/state";
 import { cleanHost } from "../../drop/blossom";
 import { Icon } from "../components/Icons";
@@ -20,19 +20,24 @@ export function SettingsScreen(): JSX.Element {
   const [turn, setTurn] = useState(s.turn ?? { url: "", username: "", credential: "" });
   const [blossom, setBlossom] = useState(s.blossom.join("\n"));
   const [saved, setSaved] = useState(false);
+  // A preference that could not be stored (storage of the shared origin full, or blocked).
+  const [unsaved, setUnsaved] = useState(false);
+  const keep = (next: Parameters<typeof saveSettings>[0]) => setUnsaved(!saveSettings(next));
 
-  const save = (e: Event) => {
+  const save = async (e: Event) => {
     e.preventDefault();
-    saveSettings({
+    const stored = saveSettings({
       relays: lines(relays).filter((u) => /^wss:\/\//.test(u)),
       trackers: lines(trackers).filter((u) => /^wss:\/\//.test(u)),
       stun: lines(stun).filter((u) => /^stuns?:/.test(u)),
-      turn: turn.url ? turn : null,
       blossom: lines(blossom)
         .map(cleanHost)
         .filter((h): h is string => !!h)
         .slice(0, 8),
     });
+    const ok = (await saveTurn(turn.url ? turn : null)) && stored;
+    setUnsaved(!ok);
+    if (!ok) return;
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
   };
@@ -58,14 +63,14 @@ export function SettingsScreen(): JSX.Element {
             type="text"
             maxLength={64}
             value={s.name}
-            onInput={(e) => saveSettings({ name: (e.target as HTMLInputElement).value })}
+            onInput={(e) => keep({ name: (e.target as HTMLInputElement).value })}
           />
         </label>
         <label class="field">
           <span>{t("messageTimer")}</span>
           <select
             value={s.ttl}
-            onChange={(e) => saveSettings({ ttl: Number((e.target as HTMLSelectElement).value) })}
+            onChange={(e) => keep({ ttl: Number((e.target as HTMLSelectElement).value) })}
           >
             {TTL_SECONDS.map((x) => (
               <option key={x} value={x}>
@@ -101,7 +106,7 @@ export function SettingsScreen(): JSX.Element {
           <input
             type="checkbox"
             checked={s.nostr}
-            onChange={(e) => saveSettings({ nostr: (e.target as HTMLInputElement).checked })}
+            onChange={(e) => keep({ nostr: (e.target as HTMLInputElement).checked })}
           />
           <span>{t("relays")}</span>
         </label>
@@ -115,7 +120,7 @@ export function SettingsScreen(): JSX.Element {
           <input
             type="checkbox"
             checked={s.torrent}
-            onChange={(e) => saveSettings({ torrent: (e.target as HTMLInputElement).checked })}
+            onChange={(e) => keep({ torrent: (e.target as HTMLInputElement).checked })}
           />
           <span>{t("trackers")}</span>
         </label>
@@ -162,7 +167,7 @@ export function SettingsScreen(): JSX.Element {
           <input
             type="checkbox"
             checked={s.relayOnly}
-            onChange={(e) => saveSettings({ relayOnly: (e.target as HTMLInputElement).checked })}
+            onChange={(e) => keep({ relayOnly: (e.target as HTMLInputElement).checked })}
           />
           <span>{t("relayOnly")}</span>
         </label>
@@ -170,7 +175,7 @@ export function SettingsScreen(): JSX.Element {
           <input
             type="checkbox"
             checked={s.blossomOn}
-            onChange={(e) => saveSettings({ blossomOn: (e.target as HTMLInputElement).checked })}
+            onChange={(e) => keep({ blossomOn: (e.target as HTMLInputElement).checked })}
           />
           <span>{t("blobOn")}</span>
         </label>
@@ -185,6 +190,11 @@ export function SettingsScreen(): JSX.Element {
           />
           <small class="hint">{t("blobServersHint")}</small>
         </label>
+        {unsaved && (
+          <p class="hint" role="alert" data-testid="settings-unsaved">
+            {t("storageFull")}
+          </p>
+        )}
         <div class="row">
           <button type="submit" class="btn btn-primary">
             {saved ? t("saved") : t("save")}
