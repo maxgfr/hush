@@ -2,12 +2,14 @@
  * Preferences: which relays, trackers and STUN/TURN servers to use, a display
  * name, the default message timer. Kept in plain localStorage, which every page
  * of the origin can read: nothing here protects a message. The one credential,
- * a TURN login, only lets someone use that relay (the UI says so).
+ * a TURN login's password, is kept out of it, sealed in IndexedDB (secrets.ts);
+ * it only lets someone use that relay (the UI says so).
  */
 import { signal } from "@preact/signals";
 import { DEFAULT_STUN } from "../net/peer";
 import { DEFAULT_BLOSSOM, DEFAULT_RELAYS, DEFAULT_TRACKERS } from "../signal/defaults";
 import type { SignalConfig } from "../signal/mux";
+import { readSecret, writeSecret } from "./secrets";
 
 export interface Settings {
   name: string;
@@ -58,12 +60,47 @@ export const settings = signal<Settings>(
   typeof localStorage === "undefined" ? DEFAULT_SETTINGS : load(),
 );
 
-export function saveSettings(next: Partial<Settings>): void {
-  settings.value = { ...settings.value, ...next };
+/** What localStorage gets: everything but the TURN credential. */
+function persist(): boolean {
+  const s = settings.value;
+  const kept = s.turn ? { ...s, turn: { ...s.turn, credential: "" } } : s;
   try {
-    localStorage.setItem(KEY, JSON.stringify(settings.value));
+    localStorage.setItem(KEY, JSON.stringify(kept));
+    return true;
   } catch {
-    // Private mode: preferences last for this tab only.
+    // Private mode or storage full: preferences last for this tab only.
+    return false;
+  }
+}
+
+/** False when the change could not be stored (it lasts until the page is reloaded). */
+export function saveSettings(next: Partial<Settings>): boolean {
+  settings.value = { ...settings.value, ...next };
+  return persist();
+}
+
+const TURN_SECRET = "turn-credential";
+
+/** Saves the TURN server, its credential sealed apart. False if any of it could not be kept. */
+export async function saveTurn(turn: Settings["turn"]): Promise<boolean> {
+  const stored = saveSettings({ turn });
+  return (await writeSecret(TURN_SECRET, turn?.credential ?? "")) && stored;
+}
+
+/**
+ * Restores the TURN credential at boot. One saved in clear by an earlier version is
+ * moved to the sealed store, then dropped from localStorage.
+ */
+export async function loadTurnCredential(): Promise<void> {
+  const turn = settings.value.turn;
+  if (!turn) return;
+  if (turn.credential) {
+    if (await writeSecret(TURN_SECRET, turn.credential)) persist();
+    return;
+  }
+  const credential = await readSecret(TURN_SECRET);
+  if (credential && settings.value.turn === turn) {
+    settings.value = { ...settings.value, turn: { ...turn, credential } };
   }
 }
 
