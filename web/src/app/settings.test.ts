@@ -32,9 +32,11 @@ globalThis.localStorage = {
 } as Storage;
 
 const turn = { url: "turn:relay.example:3478", username: "me", credential: "s3cret" };
-// Saved in clear by an earlier version, before the module loads.
-store.set(KEY, JSON.stringify({ name: "Ana", turn }));
 const mod = await import("./settings");
+// Saved in clear by an earlier version, as the module read it at load. (Set here: another test
+// file may have loaded the module first, without storage.)
+store.set(KEY, JSON.stringify({ name: "Ana", turn }));
+mod.settings.value = { ...mod.DEFAULT_SETTINGS, name: "Ana", turn };
 
 beforeEach(() => {
   full = false;
