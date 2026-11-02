@@ -21,6 +21,7 @@
     "@noble/hashes": "2.4.0",
     "@preact/signals": "2.11.2",
     "jsqr": "1.4.0",
+    "llm-connect": "2.7.0",
     "preact": "10.29.8",
     "uqr": "0.1.3"
   },
